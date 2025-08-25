@@ -1,4 +1,4 @@
-# Anthropic API 智能代理服务器配置文件模板
+# Claude Zephyr 配置文件模板
 # 复制此文件为 config.toml 并修改相应设置
 
 [server]

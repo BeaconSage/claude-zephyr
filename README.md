@@ -14,7 +14,7 @@
 ### 1. 准备工作
 - 安装Rust编译环境
 - 确保已安装Claude CLI工具
-- 准备Claude API密钥
+- 准备Claude认证令牌
 
 ### 2. 配置
 复制配置文件模板：
@@ -23,10 +23,10 @@ cp config.toml.template config.toml
 cp .env.template .env
 ```
 
-编辑 `.env` 文件，填入你的API密钥：
+编辑 `.env` 文件，填入你的认证令牌：
 ```
-AUTH_TOKEN_YAYA=your-claude-api-key-here
-AUTH_TOKEN_GPT600=another-api-key-if-needed
+AUTH_TOKEN_YAYA=your-claude-auth-token-here
+AUTH_TOKEN_GPT600=another-auth-token-if-needed
 ```
 
 ### 3. 启动服务
@@ -83,15 +83,15 @@ endpoints = [
 ]
 ```
 
-**.env** - API密钥：
+**.env** - 认证令牌：
 ```
-AUTH_TOKEN_YAYA=sk-your-api-key-here
+AUTH_TOKEN_YAYA=sk-your-auth-token-here
 ```
 
 ### 高级选项
 - `switch_threshold_ms`: 切换端点的最小延迟改善（默认50ms）
 - `dynamic_scaling`: 根据负载自动调整检查频率
-- 支持多个端点组，每组使用不同的API密钥
+- 支持多个端点组，每组使用不同的认证令牌
 
 ## 工作原理
 
@@ -120,7 +120,7 @@ AUTH_TOKEN_YAYA=sk-your-api-key-here
 ## 常见问题
 
 **Q: 所有端点都显示错误怎么办？**
-A: 检查API密钥是否正确，确保Claude CLI能正常工作。
+A: 检查认证令牌是否正确，确保Claude CLI能正常工作。
 
 **Q: 如何添加新的端点？**
 A: 编辑config.toml文件，在endpoints数组中添加新条目，重启服务。

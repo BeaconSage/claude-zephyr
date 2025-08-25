@@ -24,7 +24,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Intelligent Switching**: Automatic endpoint selection based on latency
 - **Manual Control**: Switch between auto and manual endpoint selection modes
 - **Graceful Failover**: Seamless switching with active connection tracking
-- **Multi-Group Support**: Configure multiple endpoint groups with different API keys
+- **Multi-Group Support**: Configure multiple endpoint groups with different auth tokens
 - **Dynamic Health Checks**: Adaptive check frequency based on connection load
 - **Connection Tracking**: Monitor active connections and their status
 - **Configuration-Driven**: All settings in TOML configuration file
@@ -56,7 +56,7 @@ endpoints = [
 [health_check]
 interval_seconds = 120
 timeout_seconds = 15
-auth_token = "your-anthropic-api-key-here"
+auth_token = "your-anthropic-auth-token-here"
 claude_binary_path = "/path/to/claude/binary"
 ```
 

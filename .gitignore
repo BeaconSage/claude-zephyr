@@ -5,6 +5,7 @@ Cargo.lock
 # Configuration files with sensitive data
 config.toml
 .env
+.env.local
 
 # Log files
 *.log
