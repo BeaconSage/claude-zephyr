@@ -1,7 +1,9 @@
 # Claude Zephyr
 
 解决Claude API端点不稳定问题。自动检测最快可用端点并切换。
-
+---
+![界面图](image.png)
+---
 ## 解决的问题
 
 - Claude API端点经常超时或响应慢
@@ -9,18 +11,58 @@
 - 不知道哪个端点当前最快
 - 需要一个稳定的代理来处理这些问题
 
+## 工作原理
+
+1. **真实API测速**: 使用 `claude -p "test"` 命令对每个端点进行实际调用测试
+2. **延迟测量**: 记录每个端点的完整响应时间（包括网络延迟和处理时间）
+3. **自动切换**: 选择延迟最低且可用的端点
+4. **优雅处理**: 等待活跃连接完成后再切换
+
+### 测速成本说明
+
+每次健康检查使用 **Claude 3.5 Haiku** 模型发送简单的"test"提示词，成本极低：
+
+**单端点检查消耗（实际日志数据）：**
+- 提示 tokens: ~4 个
+- 缓存 tokens: ~14815 个（首次创建后可复用）
+- 输出 tokens: ~4 个
+- 单端点检查成本: ≈ $0.000241 USD
+
+**5个端点全检查费用（以 Instcopilot 为例）：**
+- 单次全检查: $0.000241 × 5 = ≈ $0.001205 USD
+- 默认间隔60秒运行: 每小时 ≈ $0.0723 USD
+
+**动态间隔调整** - 根据连接负载自动优化：
+- 活跃使用时：30-60秒检查一次（保证服务质量）
+- 正常待机：60秒间隔检查（默认模式）
+- 长时间空闲：最长30分钟检查一次（节省成本）
+
+**个人使用场景成本对比：**
+- 工作时间运行（8小时）: ≈ $0.58/天
+- 短时间使用（2-3小时）: ≈ $0.22/天
+- 智能空闲模式（自动降频）: ≈ $0.35/天
+
+> **数据来源**: 以上计费详情来自实际使用日志记录，供参考使用
+
+> **省钱建议**: 个人用户建议按需启动，系统会自动在空闲时降低检查频率以节省成本
+
 ## 快速开始
 
-### 1. 准备工作
-- 安装Rust编译环境
-- 确保已安装Claude CLI工具
-- 准备Claude认证令牌
+### 1. 前置依赖
+请确保已安装以下工具：
+- **Rust** 编译环境：[安装 Rust](https://rustup.rs/)
+- **Claude CLI** 工具：[安装 Claude CLI](https://docs.anthropic.com/en/docs/claude-code)
+- **Git**：用于克隆项目代码
 
-### 2. 配置
-复制配置文件模板：
+### 2. 下载和配置
 ```bash
-cp config.toml.template config.toml
-cp .env.template .env
+# 克隆项目
+git clone https://github.com/your-username/claude-zephyr.git
+cd claude-zephyr
+
+# 复制配置文件模板
+cp config.toml.example config.toml
+cp .env.example .env
 ```
 
 编辑 `.env` 文件，填入你的认证令牌：
@@ -34,34 +76,71 @@ AUTH_TOKEN_BACKUP=another-auth-token-if-needed
 # 编译项目
 cargo build --release
 
+# 仪表板模式（推荐）- 实时监控界面
+./target/release/claude-zephyr --dashboard
+
 # 命令行模式（后台运行，查看日志）
 ./target/release/claude-zephyr
-
-# 仪表板模式（实时监控界面）
-./target/release/claude-zephyr --dashboard
 ```
 
 ### 4. 使用代理
 设置环境变量，让Claude CLI使用代理：
 ```bash
-export ANTHROPIC_BASE_URL="http://localhost:8088"
+export ANTHROPIC_BASE_URL="http://localhost:8080"
 claude -p "Hello Claude"
 ```
 
+---
+
+## 🚀 Instcopilot 用户急速入门
+
+**如果你使用 [Instcopilot 平台](https://instcopilot-api.com/register?aff=sl67)，可以跳过通用配置，直接使用专用配置：**
+
+> 💡 **还没有 Instcopilot 账户？** [立即注册](https://instcopilot-api.com/register?aff=sl67) 获取稳定的 Claude API 服务
+
+```bash
+# 前提：已完成上方的前置依赖安装和项目克隆
+
+# 1. 使用 Instcopilot 专用配置
+cp config.toml.example.instcopilot config.toml
+cp .env.example.instcopilot .env
+
+# 2. 编辑 .env 文件，填入你的 Instcopilot 认证令牌
+# AUTH_TOKEN_MAIN=sk-your-instcopilot-token-here
+
+# 3. 编译并启动（推荐仪表板模式）
+cargo build --release
+./target/release/claude-zephyr --dashboard
+
+# 4. 配置 Claude CLI 使用代理
+export ANTHROPIC_BASE_URL="http://localhost:8080"
+claude -p "Hello Claude"
+
+# 解放双手，尽情使用！
+```
+
+**✨ Instcopilot 用户优势：**
+- 预配置5个优化节点，开箱即用
+- 自动选择最快节点，无需手动配置
+- 智能故障转移，保证服务稳定性
+- 实时监控界面，一目了然
+
+---
+
 ## 使用方式
+
+### 仪表板模式（推荐）
+实时图形监控界面：
+- 查看所有端点状态和延迟
+- 手动选择特定端点（按1-9A-Z键）
+- 监控活跃连接情况
+- 切换自动/手动模式（按M键）
 
 ### 命令行模式
 后台运行，通过日志查看状态：
 - 自动检测各端点健康状态
 - 自动切换到最快的可用端点
 - 显示详细的切换日志
-
-### 仪表板模式
-实时图形监控界面：
-- 查看所有端点状态和延迟
-- 手动选择特定端点（按1-9A-Z键）
-- 监控活跃连接情况
-- 切换自动/手动模式（按M键）
 
 ## 配置说明
 
@@ -71,7 +150,7 @@ claude -p "Hello Claude"
 **config.toml** - 端点和服务器设置：
 ```toml
 [server]
-port = 8088
+port = 8080
 
 [[groups]]
 name = "primary-provider"
@@ -93,17 +172,10 @@ AUTH_TOKEN_MAIN=sk-your-auth-token-here
 - `dynamic_scaling`: 根据负载自动调整检查频率
 - 支持多个端点组，每组使用不同的认证令牌
 
-## 工作原理
-
-1. **定期检查**: 使用真实的Claude API调用测试所有端点
-2. **延迟测量**: 记录每个端点的响应时间
-3. **自动切换**: 选择延迟最低且可用的端点
-4. **优雅处理**: 等待活跃连接完成后再切换
-
 ## 监控
 
 ### 状态页面
-访问 http://localhost:8088/status 查看：
+访问 http://localhost:8080/status 查看：
 - 当前使用的端点
 - 所有端点的健康状态
 - 响应延迟统计

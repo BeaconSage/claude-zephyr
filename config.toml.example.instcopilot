@@ -1,0 +1,43 @@
+# Claude Zephyr - Instcopilot 专用配置
+# 🚀 Instcopilot 用户快速入门示例
+# 复制此文件为 config.toml 即可开始使用
+
+[server]
+port = 8080                        # 服务监听端口
+
+# 全局健康检查配置
+[health_check]
+interval_seconds = 60              # 健康检查间隔(秒)
+min_interval_seconds = 30          # 最小检查间隔(秒)
+max_interval_seconds = 1800        # 最大检查间隔(秒)
+timeout_seconds = 15               # 检查超时时间(秒)
+dynamic_scaling = true             # 启用动态调整
+claude_binary_path = "claude"      # Claude CLI 路径
+
+# 🎯 Instcopilot 主要节点组
+[[groups]]
+name = "instcopilot-primary"
+auth_token_env = "AUTH_TOKEN_MAIN"  # 🔥 必须在 .env 中设置
+default = true
+
+endpoints = [
+    { url = "https://cn1.instcopilot-api.com", name = "Instcopilot-CN1" },
+    { url = "https://cn2.instcopilot-api.com", name = "Instcopilot-CN2" },
+    { url = "https://hk.instcopilot-api.com",  name = "Instcopilot-HK" },
+    { url = "https://jp.instcopilot-api.com",  name = "Instcopilot-JP" },
+    { url = "https://sg.instcopilot-api.com",  name = "Instcopilot-SG" }
+]
+
+# 📝 快速开始步骤：
+# 1. 注册 Instcopilot 账户：https://instcopilot-api.com/register?aff=sl67
+# 2. 复制此文件为 config.toml
+# 3. 创建 .env 文件，添加：AUTH_TOKEN_MAIN=你的instcopilot认证令牌
+# 4. 运行：./target/release/claude-zephyr --dashboard
+# 5. 设置环境变量：export ANTHROPIC_BASE_URL="http://localhost:8080"
+# 6. 使用 Claude CLI：claude -p "Hello Claude"
+
+# 🔧 Instcopilot 特定说明：
+# - 所有端点使用相同的认证令牌
+# - 系统会自动选择最快的可用节点
+# - 在仪表板中可以手动切换节点（按1-5键）
+# - 支持自动故障转移和负载均衡

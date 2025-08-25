@@ -595,7 +595,7 @@ impl HealthCheckOrchestrator {
     async fn handle_resume(
         &self,
         next_check: &mut tokio::time::Instant,
-        current_interval: Duration,
+        _current_interval: Duration,
     ) {
         if let Ok(mut is_paused) = self.is_paused.lock() {
             *is_paused = false;

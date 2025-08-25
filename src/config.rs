@@ -37,7 +37,7 @@ pub struct EndpointConfig {
     pub url: String,
     /// Display name for this endpoint
     pub name: String,
-    /// Flag/emoji for this endpoint (for UI)
+    /// Flag/emoji for this endpoint (deprecated)
     #[serde(default)]
     pub flag: String,
     /// Whether this endpoint is the default one
@@ -52,7 +52,7 @@ pub struct SimpleEndpoint {
     pub url: String,
     /// Display name for this endpoint
     pub name: String,
-    /// Flag/emoji for this endpoint (for UI)
+    /// Flag/emoji for this endpoint (deprecated)
     #[serde(default)]
     pub flag: String,
 }
@@ -181,7 +181,9 @@ impl Config {
 
             // Get the actual token value to validate it
             let token_value = env::var(&group.auth_token_env).unwrap_or_default();
-            if token_value.contains("your-claude-auth-token-here") || token_value.contains("your-anthropic-auth-token-here") {
+            if token_value.contains("your-claude-auth-token-here")
+                || token_value.contains("your-anthropic-auth-token-here")
+            {
                 return Err(anyhow::anyhow!(
                     "❌ Please replace the placeholder auth token in '{}' environment variable with your real Claude auth token", 
                     group.auth_token_env
@@ -409,42 +411,9 @@ impl Config {
 }
 
 impl EndpointConfig {
-    /// Generate a display name from the URL if none provided
-    pub fn display_name(&self) -> String {
-        if !self.name.is_empty() {
-            self.name.clone()
-        } else {
-            generate_endpoint_name(&self.url)
-        }
-    }
-
-    /// Generate a flag/emoji from the name if none provided
+    /// Generate a simple icon (flag field is deprecated)
     pub fn display_flag(&self) -> String {
-        if !self.flag.is_empty() {
-            self.flag.clone()
-        } else {
-            generate_flag(&self.name)
-        }
-    }
-}
-
-impl SimpleEndpoint {
-    /// Generate a display name from the URL if none provided
-    pub fn display_name(&self) -> String {
-        if !self.name.is_empty() {
-            self.name.clone()
-        } else {
-            generate_endpoint_name(&self.url)
-        }
-    }
-
-    /// Generate a flag/emoji from the name if none provided
-    pub fn display_flag(&self) -> String {
-        if !self.flag.is_empty() {
-            self.flag.clone()
-        } else {
-            generate_flag(&self.name)
-        }
+        "🌐".to_string() // Simple generic icon for all endpoints
     }
 }
 
@@ -456,36 +425,5 @@ impl From<SimpleEndpoint> for EndpointConfig {
             flag: simple.flag,
             default: None,
         }
-    }
-}
-
-fn generate_endpoint_name(url: &str) -> String {
-    // Extract hostname from URL for display
-    if let Some(host) = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))
-    {
-        if let Some(domain) = host.split('/').next() {
-            // Convert something like "cn1.instcopilot-api.com" to "CN1"
-            if let Some(subdomain) = domain.split('.').next() {
-                return subdomain.to_uppercase();
-            }
-            return domain.to_uppercase();
-        }
-    }
-    url.to_string()
-}
-
-fn generate_flag(name: &str) -> String {
-    match name.to_uppercase().as_str() {
-        s if s.contains("CN") || s.contains("CHINA") => "🇨🇳".to_string(),
-        s if s.contains("HK") || s.contains("HONG") => "🇭🇰".to_string(),
-        s if s.contains("JP") || s.contains("JAPAN") => "🇯🇵".to_string(),
-        s if s.contains("SG") || s.contains("SINGAPORE") => "🇸🇬".to_string(),
-        s if s.contains("US") || s.contains("AMERICA") => "🇺🇸".to_string(),
-        s if s.contains("UK") || s.contains("BRITAIN") => "🇬🇧".to_string(),
-        s if s.contains("DE") || s.contains("GERMAN") => "🇩🇪".to_string(),
-        s if s.contains("FR") || s.contains("FRANCE") => "🇫🇷".to_string(),
-        _ => "🌍".to_string(), // Generic flag for unknown regions
     }
 }

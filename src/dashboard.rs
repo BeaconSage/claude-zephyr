@@ -487,9 +487,21 @@ impl Dashboard {
                 } else if status.error.is_none() {
                     ("--", "checking...".to_string())
                 } else {
-                    ("XX", status.error.as_ref().map(|e| {
-                        if e.contains("timeout") { "timeout" } else { "error" }
-                    }).unwrap_or("error").to_string())
+                    (
+                        "XX",
+                        status
+                            .error
+                            .as_ref()
+                            .map(|e| {
+                                if e.contains("timeout") {
+                                    "timeout"
+                                } else {
+                                    "error"
+                                }
+                            })
+                            .unwrap_or("error")
+                            .to_string(),
+                    )
                 }
             } else {
                 ("--", "checking...".to_string())
@@ -536,8 +548,8 @@ impl Dashboard {
 
             // Build clean ASCII-only status column
             let mut status_content = format!("[{}] {} {}", endpoint_key, status_char, country_code);
-            
-            // Add ASCII markers  
+
+            // Add ASCII markers
             if !current_marker.is_empty() {
                 status_content.push(' ');
                 status_content.push_str(current_marker);
@@ -570,7 +582,7 @@ impl Dashboard {
 
         // Optimized column width distribution
         let constraints = [
-            Constraint::Ratio(3, 10), // Status column gets 30% of width  
+            Constraint::Ratio(3, 10), // Status column gets 30% of width
             Constraint::Ratio(2, 10), // Endpoint name gets 20%
             Constraint::Ratio(2, 10), // Latency gets 20%
             Constraint::Ratio(3, 10), // Sparkline gets 30%
@@ -611,17 +623,10 @@ impl Dashboard {
             .iter()
             .skip(self.scroll_offset)
             .map(|conn| {
-                // Get custom name and flag for this endpoint
+                // Get custom name and use simple icon for this endpoint
                 let (endpoint_name, flag) =
                     if let Some(config) = self.endpoint_configs.get(&conn.endpoint) {
-                        (
-                            config.name.clone(),
-                            if config.flag.is_empty() {
-                                config.display_flag()
-                            } else {
-                                config.flag.clone()
-                            },
-                        )
+                        (config.name.clone(), config.display_flag())
                     } else {
                         // Fallback for old format
                         let name = conn
@@ -631,8 +636,7 @@ impl Dashboard {
                             .next()
                             .unwrap_or("")
                             .to_uppercase();
-                        let flag = get_country_flag(&name);
-                        (name, flag.to_string())
+                        (name, "🌐".to_string())
                     };
 
                 let duration = conn.duration();
@@ -751,81 +755,6 @@ impl Dashboard {
         // Pad to consistent width
         while sparkline.chars().count() < 5 {
             sparkline.push('▁');
-        }
-
-        sparkline
-    }
-
-    /// Generate an ASCII sparkline showing latency trend (fallback)
-    fn generate_ascii_sparkline(&self, history: &LatencyHistory) -> String {
-        let measurements = history.get_measurements();
-
-        if measurements.is_empty() {
-            return "     ".to_string();
-        }
-
-        if measurements.len() < 2 {
-            return "  .  ".to_string();
-        }
-
-        // Extract recent latency values (ignore failures for sparkline)
-        let recent_latencies: Vec<u64> = measurements
-            .iter()
-            .filter_map(|m| m.latency)
-            .rev() // Most recent first
-            .take(8) // Use last 8 measurements for sparkline
-            .collect();
-
-        if recent_latencies.len() < 2 {
-            return "  .  ".to_string();
-        }
-
-        // Find min and max for normalization
-        let min_latency = *recent_latencies.iter().min().unwrap_or(&0);
-        let max_latency = *recent_latencies.iter().max().unwrap_or(&100);
-
-        // Avoid division by zero
-        let range = if max_latency > min_latency {
-            max_latency - min_latency
-        } else {
-            1
-        };
-
-        // ASCII sparkline characters (4 levels)
-        let sparkline_chars = ['-', '.', ':', '|'];
-
-        let mut sparkline = String::new();
-
-        // Generate sparkline from oldest to newest (left to right)
-        for latency in recent_latencies.iter().rev() {
-            // Normalize to 0-3 range
-            let normalized = ((latency - min_latency) * 3 / range) as usize;
-            let char_index = normalized.min(3);
-            sparkline.push(sparkline_chars[char_index]);
-        }
-
-        // Pad with spaces if needed to maintain consistent width
-        while sparkline.len() < 5 {
-            sparkline.push(' ');
-        }
-
-        // Add trend indicator based on recent vs older measurements
-        if recent_latencies.len() >= 4 {
-            let recent_avg = recent_latencies[0..2].iter().sum::<u64>() / 2;
-            let older_avg = recent_latencies[recent_latencies.len() - 2..]
-                .iter()
-                .sum::<u64>()
-                / 2;
-
-            if recent_avg < older_avg * 95 / 100 {
-                sparkline.push('v'); // Getting better
-            } else if recent_avg > older_avg * 105 / 100 {
-                sparkline.push('^'); // Getting worse
-            } else {
-                sparkline.push('-'); // Stable
-            }
-        } else {
-            sparkline.push('?'); // Not enough data for trend
         }
 
         sparkline
@@ -1026,7 +955,7 @@ impl Dashboard {
 fn extract_country_code_from_name(name: &str) -> String {
     match name.to_uppercase().as_str() {
         s if s.contains("CN") => "CN".to_string(),
-        s if s.contains("HK") => "HK".to_string(), 
+        s if s.contains("HK") => "HK".to_string(),
         s if s.contains("JP") => "JP".to_string(),
         s if s.contains("SG") => "SG".to_string(),
         s if s.contains("US") => "US".to_string(),
@@ -1034,15 +963,5 @@ fn extract_country_code_from_name(name: &str) -> String {
         s if s.contains("DE") => "DE".to_string(),
         s if s.contains("FR") => "FR".to_string(),
         _ => "XX".to_string(),
-    }
-}
-
-fn get_country_flag(endpoint: &str) -> &'static str {
-    match endpoint {
-        "CN1" | "CN2" => "🇨🇳",
-        "JP" => "🇯🇵",
-        "HK" => "🇭🇰",
-        "SG" => "🇸🇬",
-        _ => "🌐",
     }
 }

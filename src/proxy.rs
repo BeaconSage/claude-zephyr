@@ -90,7 +90,10 @@ impl ProxyState {
 #[allow(dead_code)]
 pub async fn start_proxy_server(config: Config, state: SharedState) -> anyhow::Result<()> {
     let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
+    let client = Client::builder()
+        .pool_idle_timeout(std::time::Duration::from_secs(30))
+        .pool_max_idle_per_host(4)
+        .build::<_, hyper::Body>(https);
 
     let make_svc = make_service_fn(move |_conn| {
         let state = state.clone();
@@ -138,7 +141,10 @@ pub async fn start_proxy_server_with_events_dashboard(
     event_sender: EventSender,
 ) -> anyhow::Result<()> {
     let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
+    let client = Client::builder()
+        .pool_idle_timeout(std::time::Duration::from_secs(30))
+        .pool_max_idle_per_host(4)
+        .build::<_, hyper::Body>(https);
 
     // Send server started event before creating the service (no console log)
     let _ = event_sender.send(ProxyEvent::ServerStarted {
@@ -195,7 +201,10 @@ pub async fn start_proxy_server_with_events(
     event_sender: EventSender,
 ) -> anyhow::Result<()> {
     let https = HttpsConnector::new();
-    let client = Client::builder().build::<_, hyper::Body>(https);
+    let client = Client::builder()
+        .pool_idle_timeout(std::time::Duration::from_secs(30))
+        .pool_max_idle_per_host(4)
+        .build::<_, hyper::Body>(https);
 
     // Send server started event before creating the service
     let _ = event_sender.send(ProxyEvent::ServerStarted {
@@ -352,7 +361,7 @@ async fn proxy_handler_with_events_impl(
 
     // Add Authorization header with the auth token from config
     if !auth_token.is_empty() {
-        let auth_value = format!("Bearer {}", auth_token);
+        let auth_value = format!("Bearer {auth_token}");
         if let Ok(auth_header) = auth_value.parse() {
             parts.headers.insert("authorization", auth_header);
         }
@@ -380,18 +389,25 @@ async fn proxy_handler_with_events_impl(
         tracker.update_connection_status(&connection_id, ConnectionStatus::Processing);
     }
 
-    // Forward request - This will block for the entire duration of the AI response
+    // Forward request with timeout - This will block for the entire duration of the AI response
     // For AI responses, this await can take 30+ seconds for long content generation
-    let response = client.request(new_req).await;
+    // Set a generous timeout for AI responses (5 minutes)
+    let timeout_duration = std::time::Duration::from_secs(300); // 5 minutes
+    let response = tokio::time::timeout(timeout_duration, client.request(new_req)).await;
 
     match response {
-        Ok(mut resp) => {
+        Ok(Ok(mut resp)) => {
             // Response headers received, but AI might still be generating content
             // Keep status as Processing during body transmission
 
             // For streaming responses, we need to consume the entire body to ensure
             // the connection represents the true end-to-end time
-            let body_bytes = hyper::body::to_bytes(resp.body_mut()).await?;
+            // Apply timeout to body consumption as well to prevent hanging on stalled streams
+            let body_bytes = tokio::time::timeout(
+                std::time::Duration::from_secs(300), // Same 5-minute timeout
+                hyper::body::to_bytes(resp.body_mut()),
+            )
+            .await??;
 
             // NOW the AI has finished generating and transmitting - update to finishing
             {
@@ -416,10 +432,11 @@ async fn proxy_handler_with_events_impl(
 
             Ok(final_response)
         }
-        Err(e) => {
+        Ok(Err(e)) => {
+            // HTTP request error
             // Log proxy error only if not in silent mode
             if !silent_mode {
-                log_proxy_error(&endpoint_for_request, &format!("{e}"));
+                log_proxy_error(&endpoint_for_request, &format!("HTTP error: {e}"));
             }
 
             // Mark the endpoint we actually used as failed
@@ -427,7 +444,7 @@ async fn proxy_handler_with_events_impl(
                 let mut state_guard = state.lock().unwrap();
                 if let Some(status) = state_guard.endpoint_status.get_mut(&endpoint_for_request) {
                     status.available = false;
-                    status.error = Some(format!("Proxy error: {e}"));
+                    status.error = Some(format!("HTTP error: {e}"));
                     status.last_check = chrono::Utc::now();
                 }
             }
@@ -443,7 +460,37 @@ async fn proxy_handler_with_events_impl(
 
             Ok(Response::builder()
                 .status(StatusCode::BAD_GATEWAY)
-                .body(Body::from("Proxy error"))?)
+                .body(Body::from("HTTP error"))?)
+        }
+        Err(_timeout) => {
+            // Timeout error
+            // Log proxy error only if not in silent mode
+            if !silent_mode {
+                log_proxy_error(&endpoint_for_request, "Request timeout (5 minutes)");
+            }
+
+            // Mark the endpoint we actually used as failed
+            {
+                let mut state_guard = state.lock().unwrap();
+                if let Some(status) = state_guard.endpoint_status.get_mut(&endpoint_for_request) {
+                    status.available = false;
+                    status.error = Some("Request timeout".to_string());
+                    status.last_check = chrono::Utc::now();
+                }
+            }
+
+            // Complete connection tracking on timeout
+            {
+                let mut tracker = connection_tracker.lock().unwrap();
+                tracker.complete_connection(&connection_id);
+            }
+
+            // Send connection completed event
+            let _ = event_sender.send(ProxyEvent::ConnectionCompleted(connection_id.clone()));
+
+            Ok(Response::builder()
+                .status(StatusCode::GATEWAY_TIMEOUT)
+                .body(Body::from("Request timeout"))?)
         }
     }
 }
@@ -522,7 +569,7 @@ async fn proxy_handler(
 
     // Add Authorization header with the auth token from config
     if !auth_token.is_empty() {
-        let auth_value = format!("Bearer {}", auth_token);
+        let auth_value = format!("Bearer {auth_token}");
         if let Ok(auth_header) = auth_value.parse() {
             parts.headers.insert("authorization", auth_header);
         }
@@ -532,27 +579,45 @@ async fn proxy_handler(
 
     log_proxy_request(&endpoint_for_request);
 
-    // Forward request
-    let response = client.request(new_req).await;
+    // Forward request with timeout
+    let timeout_duration = std::time::Duration::from_secs(300); // 5 minutes
+    let response = tokio::time::timeout(timeout_duration, client.request(new_req)).await;
 
     match response {
-        Ok(resp) => Ok(resp),
-        Err(e) => {
-            log_proxy_error(&endpoint_for_request, &format!("{e}"));
+        Ok(Ok(resp)) => Ok(resp),
+        Ok(Err(e)) => {
+            log_proxy_error(&endpoint_for_request, &format!("HTTP error: {e}"));
 
             // Mark the endpoint we actually used as failed
             {
                 let mut state_guard = state.lock().unwrap();
                 if let Some(status) = state_guard.endpoint_status.get_mut(&endpoint_for_request) {
                     status.available = false;
-                    status.error = Some(format!("Proxy error: {e}"));
+                    status.error = Some(format!("HTTP error: {e}"));
                     status.last_check = chrono::Utc::now();
                 }
             }
 
             Ok(Response::builder()
                 .status(StatusCode::BAD_GATEWAY)
-                .body(Body::from("Proxy error"))?)
+                .body(Body::from("HTTP error"))?)
+        }
+        Err(_timeout) => {
+            log_proxy_error(&endpoint_for_request, "Request timeout (5 minutes)");
+
+            // Mark the endpoint we actually used as failed
+            {
+                let mut state_guard = state.lock().unwrap();
+                if let Some(status) = state_guard.endpoint_status.get_mut(&endpoint_for_request) {
+                    status.available = false;
+                    status.error = Some("Request timeout".to_string());
+                    status.last_check = chrono::Utc::now();
+                }
+            }
+
+            Ok(Response::builder()
+                .status(StatusCode::GATEWAY_TIMEOUT)
+                .body(Body::from("Request timeout"))?)
         }
     }
 }

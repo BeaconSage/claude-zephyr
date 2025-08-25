@@ -1,6 +1,5 @@
 use crate::config::Config;
 use crate::health::EndpointStatus;
-use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
@@ -233,7 +232,7 @@ impl ProxyStateManager {
     fn switch_endpoint_atomic(
         &self,
         new_endpoint: String,
-        reason: SwitchReason,
+        _reason: SwitchReason,
     ) -> Result<(), StateError> {
         {
             let mut current_guard = self
@@ -324,9 +323,9 @@ pub enum StateError {
 impl std::fmt::Display for StateError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            StateError::LockPoisoned(name) => write!(f, "Lock was poisoned: {}", name),
-            StateError::InvalidTransition(msg) => write!(f, "Invalid state transition: {}", msg),
-            StateError::EndpointNotFound(endpoint) => write!(f, "Endpoint not found: {}", endpoint),
+            StateError::LockPoisoned(name) => write!(f, "Lock was poisoned: {name}"),
+            StateError::InvalidTransition(msg) => write!(f, "Invalid state transition: {msg}"),
+            StateError::EndpointNotFound(endpoint) => write!(f, "Endpoint not found: {endpoint}"),
         }
     }
 }

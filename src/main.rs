@@ -1,5 +1,4 @@
 mod config;
-mod connection_manager;
 mod connection_tracker;
 mod dashboard;
 mod dev_tools;
@@ -8,7 +7,6 @@ mod events;
 mod health;
 mod health_orchestrator;
 mod logging;
-mod migration_adapter;
 mod proxy;
 mod state_manager;
 
@@ -17,8 +15,7 @@ use config::Config;
 use connection_tracker::{ConnectionTracker, SharedConnectionTracker};
 use dashboard::Dashboard;
 use events::ProxyEvent;
-use futures::future;
-use health_orchestrator::{HealthCheckOrchestrator, OrchestratorCommand};
+use health_orchestrator::HealthCheckOrchestrator;
 use logging::*;
 use proxy::{ProxyState, SharedState};
 use std::sync::{Arc, Mutex};
@@ -26,9 +23,7 @@ use tokio::sync::mpsc;
 
 #[derive(Parser)]
 #[command(name = "claude-zephyr")]
-#[command(
-    about = "Automatic endpoint switching for Claude API"
-)]
+#[command(about = "Automatic endpoint switching for Claude API")]
 struct Args {
     /// Enable TUI dashboard mode
     #[arg(long, help = "Run with interactive dashboard")]

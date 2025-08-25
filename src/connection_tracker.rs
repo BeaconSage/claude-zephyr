@@ -97,6 +97,39 @@ impl ConnectionTracker {
             .filter(|conn| conn.endpoint == endpoint)
             .collect()
     }
+
+    /// Clean up connections that have been running for too long (safety mechanism)
+    pub fn cleanup_stale_connections(&mut self, max_duration_seconds: u64) -> Vec<String> {
+        let mut stale_connections = Vec::new();
+        let current_time = chrono::Utc::now();
+
+        // Find connections that have been running longer than max_duration_seconds
+        let stale_ids: Vec<String> = self
+            .active
+            .iter()
+            .filter(|(_, conn)| {
+                let duration_seconds = (current_time - conn.start_time).num_seconds() as u64;
+                duration_seconds > max_duration_seconds
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        // Remove stale connections
+        for id in stale_ids {
+            if let Some(connection) = self.active.remove(&id) {
+                // Update endpoint distribution
+                if let Some(count) = self.endpoint_distribution.get_mut(&connection.endpoint) {
+                    *count = count.saturating_sub(1);
+                    if *count == 0 {
+                        self.endpoint_distribution.remove(&connection.endpoint);
+                    }
+                }
+                stale_connections.push(id);
+            }
+        }
+
+        stale_connections
+    }
 }
 
 /// Thread-safe wrapper for ConnectionTracker
