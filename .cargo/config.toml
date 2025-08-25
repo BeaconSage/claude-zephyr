@@ -1,0 +1,11 @@
+# Global cargo configuration for the project
+
+[build]
+# Suppress common warnings that are not critical
+rustflags = [
+    "-A", "dead_code",
+    "-A", "unused_variables", 
+    "-A", "unused_imports",
+    "-A", "clippy::new_without_default",
+    "-A", "clippy::uninlined_format_args"
+]

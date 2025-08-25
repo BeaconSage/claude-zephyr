@@ -1,0 +1,69 @@
+# Anthropic API 智能代理服务器配置文件模板
+# 复制此文件为 config.toml 并修改相应设置
+
+[server]
+port = 8080
+switch_threshold_ms = 50
+graceful_switch_timeout_ms = 30000
+
+# 全局健康检查配置
+[health_check]
+interval_seconds = 60       # 基础健康检查间隔（秒）
+min_interval_seconds = 30   # 最小健康检查间隔（秒），用于故障恢复期间的快速检查
+timeout_seconds = 15
+# 将此处替换为你的 Claude CLI 二进制文件路径
+claude_binary_path = "/path/to/claude/binary"
+# 可选参数：最大检查间隔，用于稳定运行时的节能模式
+max_interval_seconds = 3600  # 最大间隔1小时
+# 可选参数：启用动态调整，健康检查间隔在 min_interval_seconds 到 max_interval_seconds 之间自适应
+dynamic_scaling = true       # 启用动态调整
+
+# 端点组配置
+[[endpoint_groups]]
+name = "primary-endpoints"
+# 将此处替换为你的真实 Anthropic Auth Token
+auth_token = "your-anthropic-auth-token-here"
+
+# 该组的端点配置
+[[endpoint_groups.endpoints]]
+url = "https://cn1.instcopilot-api.com"
+name = "CN1"
+flag = "🇨🇳"
+default = true
+
+[[endpoint_groups.endpoints]]
+url = "https://cn2.instcopilot-api.com" 
+name = "CN2"
+flag = "🇨🇳"
+
+[[endpoint_groups.endpoints]]
+url = "https://hk.instcopilot-api.com"
+name = "HK"
+flag = "🇭🇰"
+
+[[endpoint_groups.endpoints]]
+url = "https://jp.instcopilot-api.com"
+name = "JP"
+flag = "🇯🇵"
+
+[[endpoint_groups.endpoints]]
+url = "https://sg.instcopilot-api.com"
+name = "SG"
+flag = "🇸🇬"
+
+# 备用API组（可选）
+# [[endpoint_groups]]
+# name = "backup-us"
+# auth_token = "sk-另一个认证令牌"
+#
+# [[endpoint_groups.endpoints]]
+# url = "https://us1.example-api.com"
+# name = "美国-US1"
+# flag = "🇺🇸"
+
+# 注意：
+# 1. 每个endpoint的name必须唯一
+# 2. 可以配置多个endpoint_groups，每个使用不同的auth token
+# 3. flag字段可以是任何emoji或文字
+# 4. default=true的endpoint将作为启动时的默认选择
+# 5. 使用 --dashboard 参数启用TUI仪表板模式
