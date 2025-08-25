@@ -181,9 +181,9 @@ impl Config {
 
             // Get the actual token value to validate it
             let token_value = env::var(&group.auth_token_env).unwrap_or_default();
-            if token_value.contains("your-anthropic-auth-token-here") {
+            if token_value.contains("your-claude-auth-token-here") || token_value.contains("your-anthropic-auth-token-here") {
                 return Err(anyhow::anyhow!(
-                    "❌ Please replace the placeholder auth token in '{}' environment variable with your real Anthropic auth token", 
+                    "❌ Please replace the placeholder auth token in '{}' environment variable with your real Claude auth token", 
                     group.auth_token_env
                 ));
             }

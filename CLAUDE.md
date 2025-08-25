@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Claude Zephyr** is an automatic endpoint switching tool for Claude API built in **Rust**. It provides automatic endpoint selection, health monitoring, and graceful failover capabilities. The proxy intelligently routes requests to the best available endpoint based on real-time latency measurements.
+**Claude Zephyr** is an automatic endpoint switching tool for Claude API built in **Rust**. It provides automatic endpoint selection, health monitoring, and graceful failover capabilities. The tool automatically routes requests to the best available endpoint based on real-time latency measurements.
 
 ## Architecture
 
@@ -21,7 +21,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Key Features
 - **Real API Validation**: Uses Claude CLI for accurate health checks
 - **TUI Dashboard**: Interactive terminal dashboard for real-time monitoring
-- **Intelligent Switching**: Automatic endpoint selection based on latency
+- **Automatic Switching**: Automatic endpoint selection based on latency
 - **Manual Control**: Switch between auto and manual endpoint selection modes
 - **Graceful Failover**: Seamless switching with active connection tracking
 - **Multi-Group Support**: Configure multiple endpoint groups with different auth tokens
@@ -118,7 +118,7 @@ curl http://localhost:8080/health
 curl http://localhost:8080/status | jq .
 
 # Monitor logs
-tail -f /var/log/anthropic-proxy.log
+tail -f /var/log/claude-zephyr.log
 
 # Use the monitoring script
 ./monitor.sh
@@ -176,7 +176,7 @@ export ANTHROPIC_AUTH_TOKEN="your-auth-token-here"
 
 ## Project Structure
 ```
-anthropic-proxy/
+claude-zephyr/
 ├── src/
 │   ├── main.rs          # Application entry point
 │   ├── config.rs        # Configuration management

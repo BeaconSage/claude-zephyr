@@ -2,7 +2,7 @@
 # 复制此文件为 config.toml 并根据需要调整配置
 
 [server]
-port = 8080                        # 代理服务器监听端口
+port = 8080                        # 服务监听端口
 switch_threshold_ms = 50           # 触发端点切换的最小延迟改善(毫秒)
 graceful_switch_timeout_ms = 30000 # 优雅切换的最大等待时间(毫秒)
 

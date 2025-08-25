@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Anthropic API 智能代理服务器构建脚本
+# Claude Zephyr 构建脚本
 
 set -e
 
-echo "🚀 开始构建 Anthropic API 智能代理服务器..."
+echo "🚀 开始构建 Claude Zephyr..."
 
 # 检查 Rust 是否安装
 if ! command -v cargo &> /dev/null; then
@@ -16,7 +16,7 @@ fi
 if [ ! -f "config.toml" ]; then
     echo "⚠️  警告: config.toml 文件不存在，将创建示例配置文件"
     cat > config.toml << 'EOF'
-# Anthropic API 智能代理服务器配置文件
+# Claude Zephyr 配置文件
 
 [server]
 port = 8080
@@ -35,7 +35,7 @@ endpoints = [
 [health_check]
 interval_seconds = 120
 timeout_seconds = 15
-auth_token = "your-anthropic-auth-token-here"
+auth_token = "your-claude-auth-token-here"
 claude_binary_path = "/Users/tella/.claude/local/claude"
 EOF
     echo "📝 已创建 config.toml 示例文件，请修改其中的 auth token 和 Claude 二进制路径"
@@ -65,7 +65,7 @@ echo "✅ 构建完成！"
 echo ""
 echo "📋 下一步："
 echo "1. 编辑 config.toml 文件，设置正确的 auth token 和 Claude 路径"
-echo "2. 运行服务器: cargo run 或 ./target/release/anthropic-proxy"
+echo "2. 运行服务: cargo run 或 ./target/release/claude-zephyr"
 echo "3. 设置环境变量: export ANTHROPIC_BASE_URL=\"http://localhost:8080\""
 echo ""
 echo "🔗 监控页面:"

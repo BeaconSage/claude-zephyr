@@ -21,8 +21,8 @@ dynamic_scaling = true       # 启用动态调整
 # 端点组配置
 [[endpoint_groups]]
 name = "primary-endpoints"
-# 将此处替换为你的真实 Anthropic Auth Token
-auth_token = "your-anthropic-auth-token-here"
+# 将此处替换为你的真实 Claude Auth Token
+auth_token = "your-claude-auth-token-here"
 
 # 该组的端点配置
 [[endpoint_groups.endpoints]]

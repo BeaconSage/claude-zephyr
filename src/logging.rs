@@ -80,7 +80,7 @@ pub fn log_endpoint_switch(from: &str, to: &str, from_latency: u64, to_latency: 
 /// Server related logs
 pub fn log_server_start(port: u16) {
     info!("{} ══════════════════════════════════", log_cat::SERVER);
-    info!("{} 🎯 Anthropic API Intelligent Proxy", log_cat::SERVER);
+    info!("{} 🎯 Claude Zephyr", log_cat::SERVER);
     info!("{} ⚡ Server: http://localhost:{}", log_cat::SERVER, port);
     info!(
         "{} 📊 Status: http://localhost:{}/status",
