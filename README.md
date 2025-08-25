@@ -25,8 +25,8 @@ cp .env.template .env
 
 编辑 `.env` 文件，填入你的认证令牌：
 ```
-AUTH_TOKEN_YAYA=your-claude-auth-token-here
-AUTH_TOKEN_GPT600=another-auth-token-if-needed
+AUTH_TOKEN_MAIN=your-claude-auth-token-here
+AUTH_TOKEN_BACKUP=another-auth-token-if-needed
 ```
 
 ### 3. 启动服务
@@ -74,18 +74,18 @@ claude -p "Hello Claude"
 port = 8088
 
 [[groups]]
-name = "主要端点"
-auth_token_env = "AUTH_TOKEN_YAYA"
+name = "primary-provider"
+auth_token_env = "AUTH_TOKEN_MAIN"
 default = true
 endpoints = [
-    { url = "https://cn1.example.com", name = "CN1", flag = "🇨🇳" },
-    { url = "https://hk.example.com", name = "HK", flag = "🇭🇰" }
+    { url = "https://api.provider-a.com", name = "Provider-A-1" },
+    { url = "https://api2.provider-a.com", name = "Provider-A-2" }
 ]
 ```
 
 **.env** - 认证令牌：
 ```
-AUTH_TOKEN_YAYA=sk-your-auth-token-here
+AUTH_TOKEN_MAIN=sk-your-auth-token-here
 ```
 
 ### 高级选项

@@ -24,12 +24,13 @@ switch_threshold_ms = 50
 graceful_switch_timeout_ms = 30000
 
 # API 端点列表 - 按优先级排序
+[[groups]]
+name = "primary-provider"
+auth_token_env = "AUTH_TOKEN_MAIN"
+default = true
 endpoints = [
-    "https://cn1.instcopilot-api.com",
-    "https://cn2.instcopilot-api.com", 
-    "https://hk.instcopilot-api.com",
-    "https://jp.instcopilot-api.com",
-    "https://sg.instcopilot-api.com"
+    { url = "https://api.your-provider.com", name = "Provider-Main" },
+    { url = "https://backup.your-provider.com", name = "Provider-Backup" }
 ]
 
 [health_check]

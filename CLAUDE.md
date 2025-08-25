@@ -45,12 +45,13 @@ port = 8080
 switch_threshold_ms = 50
 graceful_switch_timeout_ms = 30000
 
+[[groups]]
+name = "primary-provider"
+auth_token_env = "AUTH_TOKEN_MAIN"
+default = true
 endpoints = [
-    "https://cn1.instcopilot-api.com",
-    "https://cn2.instcopilot-api.com", 
-    "https://hk.instcopilot-api.com",
-    "https://jp.instcopilot-api.com",
-    "https://sg.instcopilot-api.com"
+    { url = "https://api.provider-a.com", name = "Provider-A-1" },
+    { url = "https://api2.provider-a.com", name = "Provider-A-2" }
 ]
 
 [health_check]

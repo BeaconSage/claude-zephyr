@@ -1,57 +1,69 @@
 # Claude Zephyr 配置文件示例
 # 复制此文件为 config.toml 并根据需要调整配置
 
+# ============ 核心配置 ============
 [server]
 port = 8080                        # 服务监听端口
-switch_threshold_ms = 50           # 触发端点切换的最小延迟改善(毫秒)
-graceful_switch_timeout_ms = 30000 # 优雅切换的最大等待时间(毫秒)
 
-# 全局健康检查配置
-[health_check]
-interval_seconds = 60              # 基础健康检查间隔(秒)
-min_interval_seconds = 30          # 最小健康检查间隔(秒)，用于故障恢复期间的快速检查
-max_interval_seconds = 3600        # 最大间隔1小时，用于稳定运行时的节能模式
-timeout_seconds = 15               # 健康检查超时时间(秒)
-dynamic_scaling = true             # 启用动态调整：健康检查间隔自适应调整
-claude_binary_path = "claude"      # Claude CLI 二进制文件路径，默认从环境变量中查找
-
-# 端点组配置 - 亚洲主要区域
+# ============ 端点组配置 ============
+# 主要API提供商 (必需配置)
 [[groups]]
-name = "asia-primary"
-auth_token_env = "AUTH_TOKEN_ASIA"     # 引用 .env 文件中的环境变量
-default = true                         # 设为默认端点组
+name = "primary-provider"           # 🔥 组名称，可自定义
+auth_token_env = "AUTH_TOKEN_MAIN"  # 🔥 .env文件中的环境变量名
+default = true                      # 🔥 设为默认组
 
-# 该组的端点配置
+# 该组的API端点
 endpoints = [
-    { url = "https://cn1.instcopilot-api.com", name = "CN1", flag = "🇨🇳" },
-    { url = "https://cn2.instcopilot-api.com", name = "CN2", flag = "🇨🇳" },
-    { url = "https://hk.instcopilot-api.com",  name = "HK",  flag = "🇭🇰" },
-    { url = "https://jp.instcopilot-api.com",  name = "JP",  flag = "🇯🇵" },
-    { url = "https://sg.instcopilot-api.com",  name = "SG",  flag = "🇸🇬" }
+    { url = "https://api.provider-a.com", name = "Provider-A-1" },
+    { url = "https://api2.provider-a.com", name = "Provider-A-2" },
+    { url = "https://backup.provider-a.com", name = "Provider-A-Backup" }
 ]
 
-# 备用端点组 - 美国区域 (可选)
+# 备用API提供商 (可选)
 # [[groups]]
-# name = "us-backup"
-# auth_token_env = "AUTH_TOKEN_US"
+# name = "secondary-provider"
+# auth_token_env = "AUTH_TOKEN_BACKUP"
 # endpoints = [
-#     { url = "https://us1.example-api.com", name = "US1", flag = "🇺🇸" },
-#     { url = "https://us2.example-api.com", name = "US2", flag = "🇺🇸" }
+#     { url = "https://api.provider-b.com", name = "Provider-B-1" },
+#     { url = "https://api.provider-b.com/v2", name = "Provider-B-V2" }
 # ]
 
-# 备用端点组 - 欧洲区域 (可选)
+# 专用API提供商 (如特定用途的端点)
 # [[groups]]
-# name = "europe-backup" 
-# auth_token_env = "AUTH_TOKEN_EU"
+# name = "special-provider"
+# auth_token_env = "AUTH_TOKEN_SPECIAL"
 # endpoints = [
-#     { url = "https://eu1.example-api.com", name = "EU1", flag = "🇪🇺" },
-#     { url = "https://eu2.example-api.com", name = "EU2", flag = "🇪🇺" }
+#     { url = "https://premium.provider-c.com", name = "Premium-API" },
+#     { url = "https://fast.provider-c.com", name = "Fast-API" }
 # ]
 
-# 配置说明:
-# 1. 每个 group 使用一个 AUTH_TOKEN，可以包含多个 endpoints
-# 2. auth_token_env 引用 .env 文件中的环境变量名
-# 3. endpoints 数组中的每个端点都必须有唯一的 name
-# 4. flag 字段可以是任何 emoji 或文字，用于 UI 显示
-# 5. default = true 的组将作为启动时的默认选择
-# 6. 所有 AUTH_TOKEN 都应该在 .env 文件中定义，确保安全性
+# ============ 高级配置 (可选，通常无需修改) ============
+[health_check]
+# interval_seconds = 60              # 健康检查间隔
+# timeout_seconds = 15               # 健康检查超时
+# dynamic_scaling = true             # 自动调整检查频率
+# claude_binary_path = "claude"      # Claude CLI 路径
+
+# switch_threshold_ms = 50           # 切换阈值(毫秒)
+# graceful_switch_timeout_ms = 30000 # 优雅切换超时
+
+# ============ 配置说明 ============
+# 🔥 标记的是必须配置的项目
+# 
+# 1. 主要步骤:
+#    - 设置 name (组名)
+#    - 设置 auth_token_env (环境变量名)
+#    - 配置 endpoints (API端点列表)
+#    - 在 .env 文件中设置对应的认证令牌
+#
+# 2. 端点命名:
+#    - name 必须唯一，建议使用提供商名称
+#    - 避免使用地区代码，重点是API提供商
+#
+# 3. 认证令牌:
+#    - 在 .env 文件中定义: AUTH_TOKEN_MAIN=sk-your-token-here
+#    - 不要直接在此文件中写入令牌
+#
+# 4. 可选功能:
+#    - flag 字段已废弃，程序不再使用Unicode图标
+#    - 大部分高级配置都有合理默认值
