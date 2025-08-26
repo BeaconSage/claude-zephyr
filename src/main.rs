@@ -6,6 +6,7 @@ mod dynamic_health;
 mod events;
 mod health;
 mod health_orchestrator;
+mod i18n;
 mod logging;
 mod proxy;
 

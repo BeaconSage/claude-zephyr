@@ -2,13 +2,19 @@
 name = "claude-zephyr"
 version = "0.1.0"
 edition = "2021"
-description = "Automatic endpoint switching for Claude API"
+description = "Automatic endpoint switching proxy for Claude API with real-time health monitoring"
 license = "MIT"
+# TODO: Update with your actual GitHub username/organization
 repository = "https://github.com/your-username/claude-zephyr"
 readme = "README.md"
 keywords = ["claude", "api", "proxy", "load-balancer", "endpoint"]
 categories = ["network-programming", "web-programming"]
-authors = ["Your Name <your.email@example.com>"]
+# TODO: Update with actual author information
+authors = ["Claude Zephyr Contributors"]
+# TODO: Update with your actual GitHub homepage
+homepage = "https://github.com/your-username/claude-zephyr"
+# TODO: Update with your actual documentation URL
+documentation = "https://github.com/your-username/claude-zephyr"
 
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
