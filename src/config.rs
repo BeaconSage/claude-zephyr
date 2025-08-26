@@ -4,6 +4,8 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
+use crate::i18n::Language;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub server: ServerConfig,
@@ -11,6 +13,9 @@ pub struct Config {
     pub groups: Vec<Group>,
     /// Global health check config (can be overridden per group)
     pub health_check: HealthCheckConfig,
+    /// UI and display settings
+    #[serde(default)]
+    pub ui: UiConfig,
 }
 
 /// Group of endpoints sharing the same auth token
@@ -79,6 +84,14 @@ pub struct HealthCheckConfig {
     pub timeout_seconds: u64,
     /// Path to Claude CLI binary
     pub claude_binary_path: String,
+}
+
+/// UI configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UiConfig {
+    /// Language setting for the interface
+    #[serde(default)]
+    pub language: Language,
 }
 
 // Default values

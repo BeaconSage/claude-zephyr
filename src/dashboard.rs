@@ -3,6 +3,7 @@ use crate::connection_tracker::{EventReceiver, SharedConnectionTracker};
 use crate::dynamic_health::LoadLevel;
 use crate::events::{ActiveConnection, ConnectionStatus, ProxyEvent, SelectionMode};
 use crate::health::{EndpointStatus, LatencyHistory};
+use crate::i18n::I18n;
 use crate::proxy::SharedState;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
@@ -61,6 +62,8 @@ pub struct Dashboard {
     cursor_index: usize,
     /// Request tracking for improved load calculation
     recent_requests: VecDeque<Instant>,
+    /// Internationalization support
+    i18n: I18n,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +122,7 @@ impl Dashboard {
             scroll_offset: 0,
             cursor_index: 0,
             recent_requests: VecDeque::new(),
+            i18n: I18n::new(config.ui.language.clone()),
         }
     }
 
@@ -482,7 +486,11 @@ impl Dashboard {
 
         // Main title with proxy information
         let proxy_url = format!("http://localhost:{}", self.proxy_port);
-        let title_text = format!("🏥 Health Monitor\n🔗 Proxy: {proxy_url}");
+        let title_text = format!(
+            "{}\n{} {proxy_url}",
+            self.i18n.app_title(),
+            self.i18n.proxy_label()
+        );
         let title = Paragraph::new(title_text)
             .block(Block::default().borders(Borders::ALL))
             .style(
@@ -532,28 +540,37 @@ impl Dashboard {
 
             let (status_char, latency_text) = if let Some(status) = status {
                 if status.available {
-                    ("OK", format!("{}ms", status.latency))
+                    (
+                        self.i18n.status_available(),
+                        format!("{}ms", status.latency),
+                    )
                 } else if status.error.is_none() {
-                    ("--", "checking...".to_string())
+                    (
+                        self.i18n.status_checking(),
+                        self.i18n.status_checking().to_string(),
+                    )
                 } else {
                     (
-                        "XX",
+                        self.i18n.status_error(),
                         status
                             .error
                             .as_ref()
                             .map(|e| {
                                 if e.contains("timeout") {
-                                    "timeout"
+                                    self.i18n.error_timeout()
                                 } else {
-                                    "error"
+                                    self.i18n.error_generic()
                                 }
                             })
-                            .unwrap_or("error")
+                            .unwrap_or(self.i18n.error_generic())
                             .to_string(),
                     )
                 }
             } else {
-                ("--", "checking...".to_string())
+                (
+                    self.i18n.status_checking(),
+                    self.i18n.status_checking().to_string(),
+                )
             };
 
             // Build status column with status and markers only
@@ -750,33 +767,71 @@ impl Dashboard {
             }
         };
 
-        let scroll_hint = if self.all_endpoints.len() > 10 {
-            " │ [↑↓] 滚动端点"
+        let scroll_hint = if self.all_endpoints.len() > 1 {
+            self.i18n.btn_browse_endpoints()
         } else {
             ""
         };
 
         let selection_hint = match self.selection_mode {
             SelectionMode::Auto => "",
-            SelectionMode::Manual => " │ [↑↓] 选择 [Enter] 确认",
+            SelectionMode::Manual => self.i18n.btn_select_confirm(),
+        };
+
+        let pause_button_text = if self.paused {
+            self.i18n.btn_resume()
+        } else {
+            self.i18n.btn_pause()
+        };
+        let mode_switch_text = match self.selection_mode {
+            SelectionMode::Auto => self.i18n.btn_to_manual(),
+            SelectionMode::Manual => self.i18n.btn_to_auto(),
         };
 
         let status_text = if self.paused {
             match self.selection_mode {
                 SelectionMode::Auto => {
-                    format!("⏸️  健康检查已暂停 {mode_indicator} │ [Q] 退出 │ [R] 手动检查 │ [P] 恢复健康检查 │ [M] 切换到手动{scroll_hint}")
+                    format!(
+                        "{} {mode_indicator} │ {} │ {} │ {} │ {}{scroll_hint}",
+                        self.i18n.status_paused(),
+                        self.i18n.btn_quit(),
+                        self.i18n.btn_manual_check(),
+                        pause_button_text,
+                        mode_switch_text
+                    )
                 }
                 SelectionMode::Manual => {
-                    format!("⏸️  健康检查已暂停 {mode_indicator} │ [Q] 退出 │ [R] 手动检查 │ [P] 恢复健康检查 │ [M] 切换到自动{selection_hint}")
+                    format!(
+                        "{} {mode_indicator} │ {} │ {} │ {} │ {}{selection_hint}",
+                        self.i18n.status_paused(),
+                        self.i18n.btn_quit(),
+                        self.i18n.btn_manual_check(),
+                        pause_button_text,
+                        mode_switch_text
+                    )
                 }
             }
         } else {
             match self.selection_mode {
                 SelectionMode::Auto => {
-                    format!("🟢 正在监控 {mode_indicator} │ [Q] 退出 │ [R] 手动检查 │ [P] 暂停健康检查 │ [M] 切换到手动{scroll_hint}")
+                    format!(
+                        "{} {mode_indicator} │ {} │ {} │ {} │ {}{scroll_hint}",
+                        self.i18n.status_monitoring(),
+                        self.i18n.btn_quit(),
+                        self.i18n.btn_manual_check(),
+                        pause_button_text,
+                        mode_switch_text
+                    )
                 }
                 SelectionMode::Manual => {
-                    format!("🟢 正在监控 {mode_indicator} │ [Q] 退出 │ [R] 手动检查 │ [P] 暂停健康检查 │ [M] 切换到自动{selection_hint}")
+                    format!(
+                        "{} {mode_indicator} │ {} │ {} │ {} │ {}{selection_hint}",
+                        self.i18n.status_monitoring(),
+                        self.i18n.btn_quit(),
+                        self.i18n.btn_manual_check(),
+                        pause_button_text,
+                        mode_switch_text
+                    )
                 }
             }
         };
@@ -864,7 +919,7 @@ impl Dashboard {
     fn build_subtitle_text(&self) -> String {
         // If paused, show paused indicator
         if self.paused {
-            return "⏸️  健康检查已暂停 - 连接监控继续运行，自动切换已停止".to_string();
+            return self.i18n.paused_subtitle().to_string();
         }
 
         let time_until_next = self
@@ -877,29 +932,29 @@ impl Dashboard {
         {
             let running_time = started_at.elapsed();
             let remaining = estimated_duration.saturating_sub(running_time);
-            format!("CHECKING... ({}s left)", remaining.as_secs())
+            self.i18n.health_checking_with_time(remaining.as_secs())
         } else if countdown_secs == 0 {
-            "READY".to_string()
+            self.i18n.health_ready().to_string()
         } else {
-            format!("Next: {countdown_secs}s")
+            self.i18n.health_next(countdown_secs)
         };
 
         // Format load status with icon and connection count
         let (load_icon, load_text) = match self.current_load_level {
-            LoadLevel::High => ("🔴", format!("High:{}", self.active_connections_count)),
-            LoadLevel::Medium => ("🟡", format!("Med:{}", self.active_connections_count)),
-            LoadLevel::Low => ("🟢", format!("Low:{}", self.active_connections_count)),
-            LoadLevel::Idle => ("⚪", "Idle".to_string()),
+            LoadLevel::High => ("🔴", self.i18n.load_high(self.active_connections_count)),
+            LoadLevel::Medium => ("🟡", self.i18n.load_medium(self.active_connections_count)),
+            LoadLevel::Low => ("🟢", self.i18n.load_low(self.active_connections_count)),
+            LoadLevel::Idle => ("⚪", self.i18n.load_idle().to_string()),
         };
 
         // Format selection mode indicator
         let mode_text = match self.selection_mode {
-            SelectionMode::Auto => "🤖AUTO".to_string(),
+            SelectionMode::Auto => self.i18n.mode_auto().to_string(),
             SelectionMode::Manual => {
                 if let Some(index) = self.manual_selected_index {
-                    format!("🎯MAN[{}]", index + 1) // Simple 1-based numbering
+                    self.i18n.mode_manual_indexed(index)
                 } else {
-                    "🎯MAN".to_string()
+                    self.i18n.mode_manual().to_string()
                 }
             }
         };
@@ -911,7 +966,7 @@ impl Dashboard {
 
             // Don't show improvement if from_latency is a placeholder (999999)
             let improvement_text = if switch.from_latency >= 999999 {
-                "New".to_string() // Initial connection, no meaningful improvement
+                self.i18n.switch_new_connection().to_string() // Initial connection, no meaningful improvement
             } else if switch.improvement > 0 {
                 format!("↓{}ms", switch.improvement)
             } else {
