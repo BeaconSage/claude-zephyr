@@ -5,7 +5,7 @@
 Solve Claude API endpoint instability issues. Automatically detect and switch to the fastest available endpoint.
 
 ---
-![Dashboard](doc/ui-example.png)
+![Dashboard](doc/ui-en.png)
 ---
 
 ## 🚀 Quick Start with Instcopilot
@@ -137,7 +137,7 @@ claude -p "Hello Claude"
 ### Dashboard Mode (Recommended)
 Real-time graphical monitoring interface:
 - View all endpoint status and latency
-- Manually select specific endpoints (press 1-9A-Z keys)
+- Manually select specific endpoints (↑↓ keys to move, Enter to confirm)
 - Monitor active connection status
 - Switch between auto/manual mode (press M key)
 
@@ -193,8 +193,8 @@ Visit http://localhost:8080/status to view:
 - `R`: Manual health check refresh
 - `P`: Pause/resume monitoring
 - `M`: Switch auto/manual mode
-- `1-9A-Z`: Manually select endpoint
-- `↑↓`: Scroll connection list
+- `↑↓`: Move cursor to select endpoint
+- `Enter`: Confirm endpoint selection
 
 ## FAQ
 
