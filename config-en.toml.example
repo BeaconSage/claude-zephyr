@@ -1,0 +1,72 @@
+# Claude Zephyr Configuration Example (English)
+# Copy this file to config.toml and adjust as needed
+
+# ============ Core Configuration ============
+[server]
+port = 8080                        # Server listening port
+
+# ============ UI Configuration ============
+[ui]
+language = "en"                    # Interface language: "en" (English) or "zh" (Chinese)
+
+# ============ Endpoint Groups Configuration ============
+# Primary API Provider (Required)
+[[groups]]
+name = "primary-provider"           # 🔥 Group name, customizable
+auth_token_env = "AUTH_TOKEN_MAIN"  # 🔥 Environment variable name in .env file
+default = true                      # 🔥 Set as default group
+
+# API endpoints for this group
+endpoints = [
+    { url = "https://api.provider-a.com", name = "Provider-A-1" },
+    { url = "https://api2.provider-a.com", name = "Provider-A-2" },
+    { url = "https://backup.provider-a.com", name = "Provider-A-Backup" }
+]
+
+# Backup API Provider (Optional)
+# [[groups]]
+# name = "secondary-provider"
+# auth_token_env = "AUTH_TOKEN_BACKUP"
+# endpoints = [
+#     { url = "https://api.provider-b.com", name = "Provider-B-1" },
+#     { url = "https://api.provider-b.com/v2", name = "Provider-B-V2" }
+# ]
+
+# Specialized API Provider (e.g., specific purpose endpoints)
+# [[groups]]
+# name = "special-provider"
+# auth_token_env = "AUTH_TOKEN_SPECIAL"
+# endpoints = [
+#     { url = "https://premium.provider-c.com", name = "Premium-API" },
+#     { url = "https://fast.provider-c.com", name = "Fast-API" }
+# ]
+
+# ============ Advanced Configuration (Optional, usually no need to modify) ============
+[health_check]
+# interval_seconds = 60              # Health check interval
+# timeout_seconds = 15               # Health check timeout
+# dynamic_scaling = true             # Auto-adjust check frequency
+# claude_binary_path = "claude"      # Claude CLI path
+
+# switch_threshold_ms = 50           # Switch threshold (milliseconds)
+# graceful_switch_timeout_ms = 30000 # Graceful switch timeout
+
+# ============ Configuration Notes ============
+# 🔥 Marked items are required configurations
+# 
+# 1. Main steps:
+#    - Set name (group name)
+#    - Set auth_token_env (environment variable name)
+#    - Configure endpoints (API endpoint list)
+#    - Set corresponding auth tokens in .env file
+#
+# 2. Endpoint naming:
+#    - name must be unique, suggest using provider name and node identifier
+#    - Focus on API provider rather than geographic location
+#
+# 3. Authentication tokens:
+#    - Define in .env file: AUTH_TOKEN_MAIN=sk-your-token-here
+#    - Don't write tokens directly in this file
+#
+# 4. Optional features:
+#    - Most advanced configurations have reasonable defaults
