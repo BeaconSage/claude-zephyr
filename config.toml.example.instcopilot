@@ -5,6 +5,9 @@
 [server]
 port = 8080                        # 服务监听端口
 
+[ui]
+language = "zh"     
+
 # 全局健康检查配置
 [health_check]
 interval_seconds = 60              # 健康检查间隔(秒)

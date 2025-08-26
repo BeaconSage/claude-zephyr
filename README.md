@@ -2,7 +2,43 @@
 
 解决Claude API端点不稳定问题。自动检测最快可用端点并切换。
 ---
-![界面图](image.png)
+![界面图](doc/ui-example.png)
+---
+
+## 🚀 Instcopilot 快速开始
+
+> 💰 **推荐**: [Instcopilot](https://instcopilot-api.com/register?aff=sl67) | 邀请码: `sl67` | 邀请注册有奖励
+
+**如果使用 Instcopilot，可以直接使用预配置文件：**
+
+```bash
+# 1. 克隆项目（需要Git）
+git clone https://github.com/your-username/claude-zephyr.git
+cd claude-zephyr
+
+# 2. 使用 Instcopilot 专用配置
+cp config.toml.example.instcopilot config.toml
+cp .env.example.instcopilot .env
+
+# 3. 编辑 .env 文件，填入你的 Instcopilot 密钥
+# AUTH_TOKEN_MAIN=sk-your-instcopilot-token-here
+
+# 4. 编译启动（需要Rust环境）
+cargo build --release
+./target/release/claude-zephyr --dashboard
+
+# 5. 使用代理
+export ANTHROPIC_BASE_URL="http://localhost:8080"
+claude -p "Hello Claude"
+```
+
+预配置包含5个优化节点，开箱即用。
+
+**前置要求：**
+- [Rust](https://rustup.rs/) 编译环境
+- [Claude CLI](https://docs.anthropic.com/en/docs/claude-code)
+- Git
+
 ---
 ## 解决的问题
 
@@ -90,43 +126,6 @@ export ANTHROPIC_BASE_URL="http://localhost:8080"
 claude -p "Hello Claude"
 ```
 
----
-
-## 🚀 Instcopilot 用户急速入门
-
-**如果你使用 [Instcopilot 平台](https://instcopilot-api.com/register?aff=sl67)，可以跳过通用配置，直接使用专用配置：**
-
-> 💡 **还没有 Instcopilot 账户？** [立即注册](https://instcopilot-api.com/register?aff=sl67) 获取稳定的 Claude API 服务
-
-```bash
-# 前提：已完成上方的前置依赖安装和项目克隆
-
-# 1. 使用 Instcopilot 专用配置
-cp config.toml.example.instcopilot config.toml
-cp .env.example.instcopilot .env
-
-# 2. 编辑 .env 文件，填入你的 Instcopilot 认证令牌
-# AUTH_TOKEN_MAIN=sk-your-instcopilot-token-here
-
-# 3. 编译并启动（推荐仪表板模式）
-cargo build --release
-./target/release/claude-zephyr --dashboard
-
-# 4. 配置 Claude CLI 使用代理
-export ANTHROPIC_BASE_URL="http://localhost:8080"
-claude -p "Hello Claude"
-
-# 解放双手，尽情使用！
-```
-
-**✨ Instcopilot 用户优势：**
-- 预配置5个优化节点，开箱即用
-- 自动选择最快节点，无需手动配置
-- 智能故障转移，保证服务稳定性
-- 实时监控界面，一目了然
-
----
-
 ## 使用方式
 
 ### 仪表板模式（推荐）
@@ -201,7 +200,35 @@ A: 编辑config.toml文件，在endpoints数组中添加新条目，重启服务
 A: 可能是之前的快速端点暂时不可用，系统自动切换到可用的端点。
 
 **Q: 可以禁用自动切换吗？**
-A: 在仪表板模式下按M键切换到手动模式，然后用1-9A-Z选择固定端点。
+A: 在仪表板模式下按M键切换到手动模式，然后用↑↓+Enter选择固定端点。
+
+## 发布前准备
+
+如果你要发布这个项目，请先更新以下配置：
+
+### 必须修改的文件：
+1. **Cargo.toml** - 更新所有标记为 `TODO` 的字段：
+   ```toml
+   repository = "https://github.com/your-username/claude-zephyr"
+   authors = ["Your Name <your.email@example.com>"]
+   homepage = "https://github.com/your-username/claude-zephyr"
+   documentation = "https://github.com/your-username/claude-zephyr"
+   ```
+
+2. **README.md** - 更新克隆命令中的用户名：
+   ```bash
+   git clone https://github.com/your-username/claude-zephyr.git
+   ```
+
+3. **CHANGELOG.md** - 更新发布日期：
+   ```markdown
+   ## [0.1.0] - 2024-XX-XX  # 改为实际发布日期
+   ```
+
+### 可选优化：
+- 添加实际的测试文件（如果需要）
+- 更新LICENSE中的版权信息
+- 添加项目截图到README中
 
 ## 开发
 
