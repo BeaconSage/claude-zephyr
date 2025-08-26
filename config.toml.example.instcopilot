@@ -12,7 +12,7 @@ language = "zh"
 [health_check]
 interval_seconds = 60              # 健康检查间隔(秒)
 min_interval_seconds = 30          # 最小检查间隔(秒)
-max_interval_seconds = 1800        # 最大检查间隔(秒)
+max_interval_seconds = 3600        # 最大检查间隔(秒，1小时，支持过夜运行)
 timeout_seconds = 15               # 检查超时时间(秒)
 dynamic_scaling = true             # 启用动态调整
 claude_binary_path = "claude"      # Claude CLI 路径
