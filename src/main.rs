@@ -8,7 +8,6 @@ mod health;
 mod health_orchestrator;
 mod logging;
 mod proxy;
-mod state_manager;
 
 use clap::Parser;
 use config::Config;

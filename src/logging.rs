@@ -36,14 +36,6 @@ pub fn log_health_failed(endpoint: &str, error: &str) {
     );
 }
 
-pub fn log_health_cycle_start() {
-    info!("{} ═══ Health Check Cycle Started ═══", log_cat::HEALTH);
-}
-
-pub fn log_health_cycle_complete() {
-    info!("{} ═══ Health Check Cycle Completed ═══", log_cat::HEALTH);
-}
-
 /// Proxy related logs
 pub fn log_proxy_request(endpoint: &str) {
     info!("{} Request → {}", log_cat::PROXY, endpoint);

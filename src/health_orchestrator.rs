@@ -32,6 +32,7 @@ pub struct HealthCheckOrchestrator {
     // Command receiver for pause/resume/refresh
     command_receiver: mpsc::UnboundedReceiver<OrchestratorCommand>,
     // Command sender (for returning to caller)
+    #[allow(dead_code)]
     command_sender: mpsc::UnboundedSender<OrchestratorCommand>,
 }
 
@@ -235,10 +236,7 @@ impl HealthCheckOrchestrator {
 
         let new_status = check_result.unwrap_or_else(|e| {
             if !dashboard_mode {
-                println!(
-                    "⚠️  Health check task error for {}: {}",
-                    endpoint_url_clone, e
-                );
+                println!("⚠️  Health check task error for {endpoint_url_clone}: {e}");
             }
             health::EndpointStatus::new_unavailable(endpoint_url_clone, format!("Task error: {e}"))
         });
@@ -249,6 +247,7 @@ impl HealthCheckOrchestrator {
     }
 
     /// Update endpoint state without switching (for batch processing)
+    #[allow(dead_code)]
     async fn update_endpoint_state_only(
         &self,
         new_status: &EndpointStatus,
@@ -486,6 +485,7 @@ impl HealthCheckOrchestrator {
         }
     }
 
+    #[allow(dead_code)]
     async fn check_and_perform_switch(
         &self,
         status: &EndpointStatus,
@@ -648,6 +648,7 @@ impl HealthCheckOrchestrator {
 
 /// Result of a health check cycle
 struct HealthCycleResult {
+    #[allow(dead_code)]
     start_time: Instant,
     results: Vec<EndpointStatus>,
     duration: Duration,

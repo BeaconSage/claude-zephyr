@@ -17,7 +17,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph, Row, Table, Wrap},
     Frame, Terminal,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::time::{Duration, Instant};
 use tokio::time::interval;
@@ -57,6 +57,10 @@ pub struct Dashboard {
     should_quit: bool,
     paused: bool,
     scroll_offset: usize,
+    /// Cursor position for endpoint selection (replaces direct key selection)
+    cursor_index: usize,
+    /// Request tracking for improved load calculation
+    recent_requests: VecDeque<Instant>,
 }
 
 #[derive(Debug, Clone)]
@@ -113,6 +117,8 @@ impl Dashboard {
             should_quit: false,
             paused: false,
             scroll_offset: 0,
+            cursor_index: 0,
+            recent_requests: VecDeque::new(),
         }
     }
 
@@ -145,11 +151,10 @@ impl Dashboard {
                     }
                 }
 
-                // Update active connections from tracker
+                // Update active connections from tracker - always run regardless of pause state
+                // Users expect to see real-time connection monitoring even when health checks are paused
                 _ = tick_interval.tick() => {
-                    if !self.paused {
-                        self.update_from_tracker(&connection_tracker);
-                    }
+                    self.update_from_tracker(&connection_tracker);
                 }
 
                 // Handle keyboard input
@@ -176,26 +181,37 @@ impl Dashboard {
                                     // Toggle selection mode
                                     self.toggle_selection_mode(&proxy_state);
                                 }
-                                KeyCode::Char(c) if c.is_ascii_digit() => {
-                                    // Manual endpoint selection (1-9)
-                                    if let Some(digit) = c.to_digit(10) {
-                                        self.handle_manual_endpoint_selection_by_number(digit as usize, &proxy_state);
-                                    }
-                                }
-                                KeyCode::Char(c) if c.is_ascii_alphabetic() => {
-                                    // Manual endpoint selection (A-Z for 10+)
-                                    let letter = c.to_ascii_uppercase();
-                                    if letter.is_ascii_uppercase() {
-                                        let index = (letter as u8 - b'A') as usize + 10; // A=10, B=11, etc.
-                                        self.handle_manual_endpoint_selection_by_index(index, &proxy_state);
-                                    }
-                                }
                                 KeyCode::Up => {
-                                    self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                                    // Move cursor up (with wraparound)
+                                    if self.cursor_index > 0 {
+                                        self.cursor_index -= 1;
+                                    } else {
+                                        self.cursor_index = self.all_endpoints.len().saturating_sub(1);
+                                    }
+
+                                    // Auto-adjust scroll offset to follow cursor
+                                    if self.cursor_index < self.scroll_offset {
+                                        self.scroll_offset = self.cursor_index;
+                                    }
                                 }
                                 KeyCode::Down => {
-                                    if self.scroll_offset < self.active_connections.len().saturating_sub(1) {
-                                        self.scroll_offset += 1;
+                                    // Move cursor down (with wraparound)
+                                    if self.cursor_index < self.all_endpoints.len().saturating_sub(1) {
+                                        self.cursor_index += 1;
+                                    } else {
+                                        self.cursor_index = 0;
+                                    }
+
+                                    // Auto-adjust scroll offset to follow cursor
+                                    // Assuming ~10 visible rows, adjust as needed
+                                    if self.cursor_index >= self.scroll_offset + 10 {
+                                        self.scroll_offset = self.cursor_index.saturating_sub(9);
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    // Confirm endpoint selection (only in manual mode)
+                                    if self.selection_mode == SelectionMode::Manual {
+                                        self.handle_manual_endpoint_selection_by_index(self.cursor_index, &proxy_state);
                                     }
                                 }
                                 _ => {}
@@ -297,7 +313,61 @@ impl Dashboard {
                 // Manual refresh was triggered - no special UI action needed
                 // The actual health check results will come via HealthUpdate events
             }
+            ProxyEvent::RequestReceived { timestamp, .. } => {
+                // Record the request timestamp for load calculation
+                self.recent_requests.push_back(timestamp);
+
+                // Clean old requests (keep only last 5 minutes of data)
+                let five_minutes_ago = timestamp - Duration::from_secs(300);
+                while let Some(&front_time) = self.recent_requests.front() {
+                    if front_time < five_minutes_ago {
+                        self.recent_requests.pop_front();
+                    } else {
+                        break;
+                    }
+                }
+
+                // Recalculate load level based on both active connections and request rate
+                self.recalculate_load_level();
+            }
             _ => {} // Connection events are handled via tracker updates
+        }
+    }
+
+    /// Recalculate load level based on both active connections and request frequency
+    fn recalculate_load_level(&mut self) {
+        let now = Instant::now();
+
+        // Calculate request rate per minute
+        let one_minute_ago = now - Duration::from_secs(60);
+        let requests_last_minute = self
+            .recent_requests
+            .iter()
+            .filter(|&&timestamp| timestamp >= one_minute_ago)
+            .count() as f64;
+
+        // Get current active connections count
+        let active_connections = self.active_connections_count;
+
+        // Improved load level calculation that considers both metrics
+        let new_load_level = match (active_connections, requests_last_minute as u32) {
+            // High load: Many concurrent connections OR high request rate
+            (conn, _) if conn > 10 => LoadLevel::High,
+            (_, req_rate) if req_rate > 30 => LoadLevel::High, // >30 requests/minute
+
+            // Medium load: Moderate concurrent connections OR moderate request rate
+            (conn, req_rate) if conn >= 4 || req_rate >= 10 => LoadLevel::Medium,
+
+            // Low load: Few connections but some request activity
+            (conn, req_rate) if conn > 0 || req_rate >= 2 => LoadLevel::Low,
+
+            // Idle: No connections and very few or no requests
+            _ => LoadLevel::Idle,
+        };
+
+        // Update load level if it changed
+        if new_load_level != self.current_load_level {
+            self.current_load_level = new_load_level;
         }
     }
 
@@ -328,17 +398,6 @@ impl Dashboard {
         }
     }
 
-    /// Handle manual endpoint selection by number (1-based)
-    fn handle_manual_endpoint_selection_by_number(
-        &mut self,
-        digit: usize,
-        proxy_state: &SharedState,
-    ) {
-        // Convert 1-based to 0-based index
-        let index = digit.saturating_sub(1);
-        self.handle_manual_endpoint_selection_by_index(index, proxy_state);
-    }
-
     /// Handle manual endpoint selection by index (0-based)
     fn handle_manual_endpoint_selection_by_index(
         &mut self,
@@ -363,20 +422,6 @@ impl Dashboard {
                 if let Ok(mut state_guard) = proxy_state.lock() {
                     state_guard.switch_endpoint_silent(endpoint.clone());
                 }
-            }
-        }
-    }
-
-    /// Get endpoint key for display (1-9, then A-Z)
-    fn get_endpoint_key(&self, index: usize) -> String {
-        if index < 9 {
-            (index + 1).to_string() // 1-9
-        } else {
-            let letter_index = index - 9; // A=0, B=1, etc.
-            if letter_index < 26 {
-                ((b'A' + letter_index as u8) as char).to_string()
-            } else {
-                "?".to_string() // Fallback for too many endpoints
             }
         }
     }
@@ -437,7 +482,7 @@ impl Dashboard {
 
         // Main title with proxy information
         let proxy_url = format!("http://localhost:{}", self.proxy_port);
-        let title_text = format!("🏥 Health Monitor\n🔗 Proxy: {}", proxy_url);
+        let title_text = format!("🏥 Health Monitor\n🔗 Proxy: {proxy_url}");
         let title = Paragraph::new(title_text)
             .block(Block::default().borders(Borders::ALL))
             .style(
@@ -467,18 +512,22 @@ impl Dashboard {
         // Ensure we show all endpoints, even if they haven't been health-checked yet
         let mut rows: Vec<Row> = Vec::new();
 
-        for (index, endpoint_url) in self.all_endpoints.iter().enumerate() {
+        for (index, endpoint_url) in self
+            .all_endpoints
+            .iter()
+            .enumerate()
+            .skip(self.scroll_offset)
+        {
             let status = self.endpoint_health.get(endpoint_url);
             let is_current = endpoint_url == &self.current_endpoint;
             let endpoint_config = self.endpoint_configs.get(endpoint_url);
 
-            // Determine if this endpoint should be highlighted based on selection mode
-            let is_highlighted = match self.selection_mode {
-                SelectionMode::Auto => is_current,
-                SelectionMode::Manual => {
-                    // In manual mode, highlight the manually selected endpoint
-                    self.manual_selected_index == Some(index)
-                }
+            // Determine highlighting - cursor position takes precedence for visual feedback
+            let is_cursor_position = index == self.cursor_index;
+            let is_current_endpoint = endpoint_url == &self.current_endpoint;
+            let is_manually_selected = match self.selection_mode {
+                SelectionMode::Manual => self.manual_selected_index == Some(index),
+                SelectionMode::Auto => false,
             };
 
             let (status_char, latency_text) = if let Some(status) = status {
@@ -507,29 +556,26 @@ impl Dashboard {
                 ("--", "checking...".to_string())
             };
 
-            // Build status column with endpoint number, status, country, and markers
-            let endpoint_key = self.get_endpoint_key(index); // 1-9, then A-Z
+            // Build status column with status and markers only
             let current_marker = if is_current { "*" } else { "" }; // ASCII star for active
-            let manual_marker = if self.selection_mode == SelectionMode::Manual && is_highlighted {
-                ">" // ASCII arrow for manual selection
-            } else {
-                ""
-            };
+            let manual_marker =
+                if self.selection_mode == SelectionMode::Manual && is_manually_selected {
+                    ">" // ASCII arrow for manual selection
+                } else {
+                    ""
+                };
 
-            // Use custom name and country code if available, otherwise fallback to generated
-            let (endpoint_name, country_code) = if let Some(config) = endpoint_config {
-                let country = extract_country_code_from_name(&config.name);
-                (config.name.clone(), country)
+            // Use custom name if available, otherwise fallback to generated
+            let endpoint_name = if let Some(config) = endpoint_config {
+                config.name.clone()
             } else {
                 // Fallback for old format or missing config
-                let name = endpoint_url
+                endpoint_url
                     .replace("https://", "")
                     .split('.')
                     .next()
                     .unwrap_or("")
-                    .to_uppercase();
-                let country = extract_country_code_from_name(&name);
-                (name, country)
+                    .to_uppercase()
             };
 
             // Generate proper Unicode sparkline for this endpoint
@@ -546,10 +592,10 @@ impl Dashboard {
 
             let sparkline = raw_sparkline;
 
-            // Build clean ASCII-only status column
-            let mut status_content = format!("[{}] {} {}", endpoint_key, status_char, country_code);
+            // Build clean status column - only essential status info
+            let mut status_content = status_char.to_string();
 
-            // Add ASCII markers
+            // Add important markers
             if !current_marker.is_empty() {
                 status_content.push(' ');
                 status_content.push_str(current_marker);
@@ -566,26 +612,43 @@ impl Dashboard {
                 ratatui::widgets::Cell::from(sparkline),
             ]);
 
-            // Highlight based on selection mode
-            let styled_row = if is_highlighted {
+            // Apply different highlight styles based on endpoint state
+            let styled_row = if is_cursor_position {
+                // Cursor position - blue background for navigation
+                row.style(
+                    Style::default()
+                        .bg(Color::Blue)
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                )
+            } else if is_current_endpoint {
+                // Currently active endpoint - green text
                 row.style(
                     Style::default()
                         .fg(Color::Green)
                         .add_modifier(Modifier::BOLD),
                 )
+            } else if is_manually_selected {
+                // Manually selected endpoint - yellow text
+                row.style(
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )
             } else {
+                // Normal endpoint - default style
                 row
             };
 
             rows.push(styled_row);
         }
 
-        // Optimized column width distribution
+        // Optimized column width distribution - status column is now much cleaner
         let constraints = [
-            Constraint::Ratio(3, 10), // Status column gets 30% of width
-            Constraint::Ratio(2, 10), // Endpoint name gets 20%
+            Constraint::Ratio(1, 10), // Status column gets 10% (simplified)
+            Constraint::Ratio(3, 10), // Endpoint name gets 30%
             Constraint::Ratio(2, 10), // Latency gets 20%
-            Constraint::Ratio(3, 10), // Sparkline gets 30%
+            Constraint::Ratio(4, 10), // Sparkline gets 40%
         ];
 
         let table = Table::new(rows)
@@ -621,23 +684,20 @@ impl Dashboard {
         let items: Vec<ListItem> = self
             .active_connections
             .iter()
-            .skip(self.scroll_offset)
             .map(|conn| {
-                // Get custom name and use simple icon for this endpoint
-                let (endpoint_name, flag) =
-                    if let Some(config) = self.endpoint_configs.get(&conn.endpoint) {
-                        (config.name.clone(), config.display_flag())
-                    } else {
-                        // Fallback for old format
-                        let name = conn
-                            .endpoint
-                            .replace("https://", "")
-                            .split('.')
-                            .next()
-                            .unwrap_or("")
-                            .to_uppercase();
-                        (name, "🌐".to_string())
-                    };
+                // Get custom name for this endpoint
+                let endpoint_name = if let Some(config) = self.endpoint_configs.get(&conn.endpoint)
+                {
+                    config.name.clone()
+                } else {
+                    // Fallback for old format
+                    conn.endpoint
+                        .replace("https://", "")
+                        .split('.')
+                        .next()
+                        .unwrap_or("")
+                        .to_uppercase()
+                };
 
                 let duration = conn.duration();
 
@@ -658,9 +718,8 @@ impl Dashboard {
                 };
 
                 let content = format!(
-                    "{} → {} {}({:.1}s)\n├─ Status: {}\n└─ Active: {}{}",
+                    "{} → {} ({:.1}s)\n├─ Status: {}\n└─ Active: {}{}",
                     &conn.id[4..10], // Short ID
-                    flag,
                     endpoint_name,
                     duration as f64 / 1000.0,
                     status_indicator,
@@ -691,10 +750,35 @@ impl Dashboard {
             }
         };
 
-        let status_text = if self.paused {
-            format!("⏸️  SYSTEM PAUSED {} │ [Q] 退出 │ [R] 手动检查 │ [P] 恢复监控 │ [M] 模式 │ [1-9A-Z] 选择 │ [↑↓] 滚动", mode_indicator)
+        let scroll_hint = if self.all_endpoints.len() > 10 {
+            " │ [↑↓] 滚动端点"
         } else {
-            format!("🟢 MONITORING {} │ [Q] 退出 │ [R] 手动检查 │ [P] 暂停监控 │ [M] 模式 │ [1-9A-Z] 选择 │ [↑↓] 滚动", mode_indicator)
+            ""
+        };
+
+        let selection_hint = match self.selection_mode {
+            SelectionMode::Auto => "",
+            SelectionMode::Manual => " │ [↑↓] 选择 [Enter] 确认",
+        };
+
+        let status_text = if self.paused {
+            match self.selection_mode {
+                SelectionMode::Auto => {
+                    format!("⏸️  健康检查已暂停 {mode_indicator} │ [Q] 退出 │ [R] 手动检查 │ [P] 恢复健康检查 │ [M] 切换到手动{scroll_hint}")
+                }
+                SelectionMode::Manual => {
+                    format!("⏸️  健康检查已暂停 {mode_indicator} │ [Q] 退出 │ [R] 手动检查 │ [P] 恢复健康检查 │ [M] 切换到自动{selection_hint}")
+                }
+            }
+        } else {
+            match self.selection_mode {
+                SelectionMode::Auto => {
+                    format!("🟢 正在监控 {mode_indicator} │ [Q] 退出 │ [R] 手动检查 │ [P] 暂停健康检查 │ [M] 切换到手动{scroll_hint}")
+                }
+                SelectionMode::Manual => {
+                    format!("🟢 正在监控 {mode_indicator} │ [Q] 退出 │ [R] 手动检查 │ [P] 暂停健康检查 │ [M] 切换到自动{selection_hint}")
+                }
+            }
         };
 
         let status =
@@ -760,99 +844,6 @@ impl Dashboard {
         sparkline
     }
 
-    /// Calculate the actual display width of text in terminal (considering emoji width)
-    fn display_width(&self, text: &str) -> usize {
-        let mut width = 0;
-        let mut chars = text.chars().peekable();
-
-        while let Some(ch) = chars.next() {
-            width += match ch {
-                // Common single emoji characters - most take 2 terminal columns
-                '✅' | '❌' | '⏳' | '⭐' | '🎯' | '🔴' | '🟡' | '🟢' | '⚪' | '🌐' => {
-                    2
-                }
-                // Regional indicator symbols (for country flags like 🇨🇳)
-                '\u{1F1E6}'..='\u{1F1FF}' => {
-                    // Country flags are made of two regional indicator symbols
-                    // Skip the next character if it's also a regional indicator
-                    if let Some(next_ch) = chars.peek() {
-                        if ('\u{1F1E6}'..='\u{1F1FF}').contains(next_ch) {
-                            chars.next(); // Consume the second part of the flag
-                        }
-                    }
-                    2 // Full flag takes 2 terminal columns
-                }
-                // Other symbols and regular characters
-                _ => {
-                    if ch.is_ascii() {
-                        1
-                    } else {
-                        2
-                    }
-                }
-            };
-        }
-        width
-    }
-
-    /// Create a fixed-width status column with proper padding
-    fn format_status_column(
-        &self,
-        endpoint_key: String,
-        status_icon: String,
-        flag: String,
-        current_marker: &str,
-        manual_marker: &str,
-        target_width: usize,
-    ) -> String {
-        // Build the base content
-        let content = format!(
-            "[{}] {} {} {} {}",
-            endpoint_key, status_icon, flag, current_marker, manual_marker
-        );
-
-        // Calculate actual display width
-        let actual_width = self.display_width(&content);
-
-        // Pad or truncate to target width
-        if actual_width >= target_width {
-            // Truncate if too long, but keep essential parts
-            let truncated = format!("[{}] {} {}", endpoint_key, status_icon, flag);
-            let trunc_width = self.display_width(&truncated);
-            if trunc_width <= target_width {
-                // Pad the truncated version
-                let padding = target_width - trunc_width;
-                format!("{}{}", truncated, " ".repeat(padding))
-            } else {
-                // Extreme truncation - just key and icon
-                format!("[{}] {}", endpoint_key, status_icon)
-            }
-        } else {
-            // Pad with spaces to reach target width
-            let padding = target_width - actual_width;
-            format!("{}{}", content, " ".repeat(padding))
-        }
-    }
-
-    /// Center-align text within a given width (with proper Unicode width handling)
-    fn center_align_text(&self, text: &str, width: usize) -> String {
-        let text_width = self.display_width(text);
-        if text_width >= width {
-            return text.to_string();
-        }
-
-        let padding = width - text_width;
-        let left_padding = padding / 2;
-        let right_padding = padding - left_padding;
-
-        format!(
-            "{}{}{}",
-            " ".repeat(left_padding),
-            text,
-            " ".repeat(right_padding)
-        )
-    }
-
     /// Extract endpoint display name from URL and config
     fn get_endpoint_name(&self, endpoint_url: &str) -> String {
         self.endpoint_configs
@@ -873,7 +864,7 @@ impl Dashboard {
     fn build_subtitle_text(&self) -> String {
         // If paused, show paused indicator
         if self.paused {
-            return "⏸️  SYSTEM PAUSED - Health checks and auto-switching stopped".to_string();
+            return "⏸️  健康检查已暂停 - 连接监控继续运行，自动切换已停止".to_string();
         }
 
         let time_until_next = self
@@ -906,7 +897,7 @@ impl Dashboard {
             SelectionMode::Auto => "🤖AUTO".to_string(),
             SelectionMode::Manual => {
                 if let Some(index) = self.manual_selected_index {
-                    format!("🎯MAN[{}]", self.get_endpoint_key(index))
+                    format!("🎯MAN[{}]", index + 1) // Simple 1-based numbering
                 } else {
                     "🎯MAN".to_string()
                 }
@@ -928,14 +919,10 @@ impl Dashboard {
             };
 
             format!(
-                "{} • {}{} • {} • 🔄{}→{} ({})",
-                status_text, load_icon, load_text, mode_text, from_name, to_name, improvement_text
+                "{status_text} • {load_icon}{load_text} • {mode_text} • 🔄{from_name}→{to_name} ({improvement_text})"
             )
         } else {
-            format!(
-                "{} • {}{} • {}",
-                status_text, load_icon, load_text, mode_text
-            )
+            format!("{status_text} • {load_icon}{load_text} • {mode_text}")
         }
     }
 
@@ -947,21 +934,6 @@ impl Dashboard {
 
         let truncate_len = max_len.saturating_sub(3); // Reserve space for "..."
         let truncated: String = text.chars().take(truncate_len).collect();
-        format!("{}...", truncated)
-    }
-}
-
-/// Extract country code from endpoint name
-fn extract_country_code_from_name(name: &str) -> String {
-    match name.to_uppercase().as_str() {
-        s if s.contains("CN") => "CN".to_string(),
-        s if s.contains("HK") => "HK".to_string(),
-        s if s.contains("JP") => "JP".to_string(),
-        s if s.contains("SG") => "SG".to_string(),
-        s if s.contains("US") => "US".to_string(),
-        s if s.contains("UK") => "UK".to_string(),
-        s if s.contains("DE") => "DE".to_string(),
-        s if s.contains("FR") => "FR".to_string(),
-        _ => "XX".to_string(),
+        format!("{truncated}...")
     }
 }

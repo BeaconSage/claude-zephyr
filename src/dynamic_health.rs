@@ -50,12 +50,21 @@ impl LoadMetrics {
             0
         };
 
-        // Determine new load level
-        let new_load_level = match active_count {
-            0 => LoadLevel::Idle,
-            1..=3 => LoadLevel::Low,
-            4..=10 => LoadLevel::Medium,
-            _ => LoadLevel::High,
+        // Determine new load level based on both active connections and request rate
+        let requests_last_minute = self.get_request_rate();
+        let new_load_level = match (active_count, requests_last_minute as u32) {
+            // High load: Many concurrent connections OR high request rate
+            (conn, _) if conn > 10 => LoadLevel::High,
+            (_, req_rate) if req_rate > 30 => LoadLevel::High, // >30 requests/minute
+
+            // Medium load: Moderate concurrent connections OR moderate request rate
+            (conn, req_rate) if conn >= 4 || req_rate >= 10 => LoadLevel::Medium,
+
+            // Low load: Few connections but some request activity
+            (conn, req_rate) if conn > 0 || req_rate >= 2 => LoadLevel::Low,
+
+            // Idle: No connections and very few or no requests
+            _ => LoadLevel::Idle,
         };
 
         // Update if load level changed

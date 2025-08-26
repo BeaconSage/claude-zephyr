@@ -378,6 +378,12 @@ async fn proxy_handler_with_events_impl(
     // Send connection started event
     let _ = event_sender.send(ProxyEvent::ConnectionStarted(active_connection));
 
+    // Send request received event for load tracking
+    let _ = event_sender.send(ProxyEvent::RequestReceived {
+        endpoint: endpoint_for_request.clone(),
+        timestamp: std::time::Instant::now(),
+    });
+
     // Log proxy request only if not in silent mode
     if !silent_mode {
         log_proxy_request(&endpoint_for_request);

@@ -99,6 +99,7 @@ impl ConnectionTracker {
     }
 
     /// Clean up connections that have been running for too long (safety mechanism)
+    #[allow(dead_code)]
     pub fn cleanup_stale_connections(&mut self, max_duration_seconds: u64) -> Vec<String> {
         let mut stale_connections = Vec::new();
         let current_time = chrono::Utc::now();

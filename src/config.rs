@@ -37,9 +37,6 @@ pub struct EndpointConfig {
     pub url: String,
     /// Display name for this endpoint
     pub name: String,
-    /// Flag/emoji for this endpoint (deprecated)
-    #[serde(default)]
-    pub flag: String,
     /// Whether this endpoint is the default one
     #[serde(default)]
     pub default: Option<bool>,
@@ -52,9 +49,6 @@ pub struct SimpleEndpoint {
     pub url: String,
     /// Display name for this endpoint
     pub name: String,
-    /// Flag/emoji for this endpoint (deprecated)
-    #[serde(default)]
-    pub flag: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,7 +123,7 @@ impl Config {
 
         for path in &config_paths {
             if Path::new(path).exists() {
-                println!("📋 Loading configuration from: {}", path);
+                println!("📋 Loading configuration from: {path}");
                 return Self::load_from_file(path);
             }
         }
@@ -410,19 +404,11 @@ impl Config {
     }
 }
 
-impl EndpointConfig {
-    /// Generate a simple icon (flag field is deprecated)
-    pub fn display_flag(&self) -> String {
-        "🌐".to_string() // Simple generic icon for all endpoints
-    }
-}
-
 impl From<SimpleEndpoint> for EndpointConfig {
     fn from(simple: SimpleEndpoint) -> Self {
         EndpointConfig {
             url: simple.url,
             name: simple.name,
-            flag: simple.flag,
             default: None,
         }
     }

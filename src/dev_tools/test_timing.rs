@@ -84,8 +84,6 @@ pub async fn test_health_check_timing() -> anyhow::Result<()> {
 
                             test_results.push(TestResult {
                                 cycle: cycle_count,
-                                expected_time,
-                                actual_time: now,
                                 timing_error,
                                 is_accurate,
                                 interval: actual_interval,
@@ -128,8 +126,6 @@ pub async fn test_health_check_timing() -> anyhow::Result<()> {
 #[derive(Debug)]
 struct TestResult {
     cycle: u32,
-    expected_time: Instant,
-    actual_time: Instant,
     timing_error: Duration,
     is_accurate: bool,
     interval: Duration,
@@ -162,11 +158,8 @@ fn analyze_test_results(results: &[TestResult]) -> anyhow::Result<()> {
         .max()
         .unwrap_or(Duration::ZERO);
 
-    println!("Total cycles observed: {}", total_cycles);
-    println!(
-        "Accurate cycles: {}/{} ({:.1}%)",
-        accurate_cycles, total_cycles, accuracy_rate
-    );
+    println!("Total cycles observed: {total_cycles}");
+    println!("Accurate cycles: {accurate_cycles}/{total_cycles} ({accuracy_rate:.1}%)");
     println!("Average timing error: {}ms", avg_error.as_millis());
     println!("Maximum timing error: {}ms", max_error.as_millis());
 
@@ -205,10 +198,7 @@ fn analyze_test_results(results: &[TestResult]) -> anyhow::Result<()> {
     } else {
         println!("❌ FAILED - Timing synchronization issues detected");
         if accuracy_rate < 70.0 {
-            println!(
-                "   → Accuracy rate too low: {:.1}% (expected ≥70%)",
-                accuracy_rate
-            );
+            println!("   → Accuracy rate too low: {accuracy_rate:.1}% (expected ≥70%)");
         }
         if max_error >= Duration::from_secs(10) {
             println!(

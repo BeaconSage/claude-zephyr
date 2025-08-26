@@ -31,6 +31,17 @@ pub enum ProxyEvent {
     ConnectionStarted(ActiveConnection),
     /// A connection has completed
     ConnectionCompleted(String), // connection_id
+    /// A new request has been received (for load tracking)
+    RequestReceived {
+        endpoint: String,
+        timestamp: std::time::Instant,
+    },
+    /// Load level has been recalculated (for health check interval adjustment)
+    LoadLevelUpdated {
+        load_level: LoadLevel,
+        request_rate: f64,
+        active_connections: u32,
+    },
     /// Health check cycle started
     HealthCheckStarted {
         actual_interval: Duration,
