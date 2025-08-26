@@ -262,6 +262,7 @@ async fn handle_request_with_events(
 ) -> anyhow::Result<Response<Body>> {
     match req.uri().path() {
         "/status" => status_handler(state, Some(connection_tracker.clone())).await,
+        "/diagnostics" => diagnostics_handler(connection_tracker.clone()).await,
         "/health" => health_handler().await,
         _ => proxy_handler_with_events(req, state, client, connection_tracker, event_sender).await,
     }
@@ -276,6 +277,7 @@ async fn handle_request_with_events_dashboard(
 ) -> anyhow::Result<Response<Body>> {
     match req.uri().path() {
         "/status" => status_handler(state, Some(connection_tracker.clone())).await,
+        "/diagnostics" => diagnostics_handler(connection_tracker.clone()).await,
         "/health" => health_handler().await,
         _ => {
             proxy_handler_with_events_dashboard(
@@ -369,10 +371,12 @@ async fn proxy_handler_with_events_impl(
 
     let new_req = Request::from_parts(parts, body);
 
-    // Start connection tracking RIGHT BEFORE the actual HTTP request
+    // Start connection tracking and set to processing in single lock acquisition
     let active_connection = {
         let mut tracker = connection_tracker.lock().unwrap();
-        tracker.start_connection(connection_id.clone(), endpoint_for_request.clone())
+        let connection = tracker.start_connection(connection_id.clone(), endpoint_for_request.clone());
+        tracker.update_connection_status(&connection_id, ConnectionStatus::Processing);
+        connection
     };
 
     // Send connection started event
@@ -387,12 +391,6 @@ async fn proxy_handler_with_events_impl(
     // Log proxy request only if not in silent mode
     if !silent_mode {
         log_proxy_request(&endpoint_for_request);
-    }
-
-    // Update connection status to processing BEFORE the actual request
-    {
-        let mut tracker = connection_tracker.lock().unwrap();
-        tracker.update_connection_status(&connection_id, ConnectionStatus::Processing);
     }
 
     // Forward request with timeout - This will block for the entire duration of the AI response
@@ -626,6 +624,36 @@ async fn proxy_handler(
                 .body(Body::from("Request timeout"))?)
         }
     }
+}
+
+async fn diagnostics_handler(
+    connection_tracker: SharedConnectionTracker,
+) -> anyhow::Result<Response<Body>> {
+    let diagnostics = {
+        let tracker = connection_tracker.lock().unwrap();
+        tracker.get_connection_diagnostics()
+    };
+
+    let response_json = serde_json::json!({
+        "connection_diagnostics": {
+            "total_active": diagnostics.total_active,
+            "endpoint_distribution": diagnostics.endpoint_counts,
+            "connection_durations": diagnostics.duration_stats,
+            "completed_count": diagnostics.completed_count,
+            "peak_concurrent": diagnostics.peak_concurrent,
+            "longest_connection_seconds": diagnostics.duration_stats.iter().max().unwrap_or(&0),
+            "average_duration_seconds": if diagnostics.duration_stats.is_empty() { 
+                0 
+            } else { 
+                diagnostics.duration_stats.iter().sum::<u64>() / diagnostics.duration_stats.len() as u64 
+            }
+        }
+    });
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(response_json.to_string()))?)
 }
 
 async fn status_handler(

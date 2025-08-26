@@ -1,8 +1,22 @@
 use crate::events::{ActiveConnection, ConnectionStatus};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 use tokio::sync::mpsc;
+
+/// Global counter for unique connection IDs
+static CONNECTION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Diagnostic information about connection tracker state
+#[derive(Debug, Clone)]
+pub struct ConnectionDiagnostics {
+    pub total_active: u32,
+    pub endpoint_counts: HashMap<String, u32>,
+    pub duration_stats: Vec<u64>,
+    pub completed_count: u64,
+    pub peak_concurrent: u32,
+}
 
 /// Tracks active connections and provides statistics
 #[derive(Debug)]
@@ -98,8 +112,60 @@ impl ConnectionTracker {
             .collect()
     }
 
+    /// Get diagnostic information about connections
+    pub fn get_connection_diagnostics(&self) -> ConnectionDiagnostics {
+        let current_time = chrono::Utc::now();
+        let mut endpoint_counts = HashMap::new();
+        let mut duration_stats = Vec::new();
+
+        for conn in self.active.values() {
+            // Count connections per endpoint
+            *endpoint_counts.entry(conn.endpoint.clone()).or_insert(0) += 1;
+            
+            // Calculate connection duration
+            let duration_seconds = (current_time - conn.start_time).num_seconds() as u64;
+            duration_stats.push(duration_seconds);
+        }
+
+        ConnectionDiagnostics {
+            total_active: self.active.len() as u32,
+            endpoint_counts,
+            duration_stats,
+            completed_count: self.completed_count,
+            peak_concurrent: self.peak_concurrent,
+        }
+    }
+
+    /// Clean up connections for endpoints that are no longer active
+    pub fn cleanup_orphaned_connections(&mut self, current_active_endpoint: &str) -> Vec<String> {
+        let mut orphaned_connections = Vec::new();
+
+        // Find connections to endpoints that don't match the current active endpoint
+        let orphaned_ids: Vec<String> = self
+            .active
+            .iter()
+            .filter(|(_, conn)| conn.endpoint != current_active_endpoint)
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        // Remove orphaned connections
+        for id in orphaned_ids {
+            if let Some(connection) = self.active.remove(&id) {
+                // Update endpoint distribution
+                if let Some(count) = self.endpoint_distribution.get_mut(&connection.endpoint) {
+                    *count = count.saturating_sub(1);
+                    if *count == 0 {
+                        self.endpoint_distribution.remove(&connection.endpoint);
+                    }
+                }
+                orphaned_connections.push(id);
+            }
+        }
+
+        orphaned_connections
+    }
+
     /// Clean up connections that have been running for too long (safety mechanism)
-    #[allow(dead_code)]
     pub fn cleanup_stale_connections(&mut self, max_duration_seconds: u64) -> Vec<String> {
         let mut stale_connections = Vec::new();
         let current_time = chrono::Utc::now();
@@ -138,13 +204,12 @@ pub type SharedConnectionTracker = Arc<Mutex<ConnectionTracker>>;
 
 /// Utility to generate unique connection IDs
 pub fn generate_connection_id() -> String {
-    format!(
-        "req_{}",
-        SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_millis()
-    )
+    let counter = CONNECTION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let timestamp = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_millis();
+    format!("req_{timestamp}_{counter}")
 }
 
 /// Event sender for dashboard communication

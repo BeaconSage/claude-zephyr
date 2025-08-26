@@ -273,17 +273,8 @@ impl HealthCheckOrchestrator {
         event_sender: &mpsc::UnboundedSender<ProxyEvent>,
         cycle_winner_chosen: std::sync::Arc<std::sync::Mutex<bool>>,
     ) -> Option<EndpointStatus> {
-        // Update state with preserved history
+        // Update state with preserved history - now handles state update internally
         let final_status = self.merge_with_existing_status(new_status, state).await?;
-
-        // Update the state with the merged status (important for history preservation)
-        {
-            if let Ok(mut state_guard) = state.lock() {
-                state_guard
-                    .endpoint_status
-                    .insert(final_status.endpoint.clone(), final_status.clone());
-            }
-        }
 
         // Send health update event
         let _ = event_sender.send(ProxyEvent::HealthUpdate(final_status.clone()));
@@ -301,6 +292,22 @@ impl HealthCheckOrchestrator {
         let _ = self.event_sender.send(ProxyEvent::HealthCheckCompleted {
             duration: cycle_result.duration,
         });
+
+        // Perform periodic cleanup of stale connections (5 minutes timeout)
+        if let Some(ref tracker) = self.connection_tracker {
+            if let Ok(mut tracker_guard) = tracker.lock() {
+                let stale = tracker_guard.cleanup_stale_connections(300); // 5 minutes
+                if !stale.is_empty() {
+                    if !self.dashboard_mode {
+                        println!("🧹 Cleaned up {} stale connections", stale.len());
+                    }
+                    // Send cleanup events for stale connections
+                    for connection_id in stale {
+                        let _ = self.event_sender.send(ProxyEvent::ConnectionCompleted(connection_id));
+                    }
+                }
+            }
+        }
 
         if !self.dashboard_mode {
             println!(
@@ -463,26 +470,31 @@ impl HealthCheckOrchestrator {
         new_status: &EndpointStatus,
         state: &SharedState,
     ) -> Option<EndpointStatus> {
-        let state_guard = state.lock().ok()?;
-
-        if let Some(existing_status) = state_guard.endpoint_status.get(&new_status.endpoint) {
-            let mut updated_status = existing_status.clone();
+        let mut state_guard = state.lock().ok()?;
+        
+        let updated_status = if let Some(existing_status) = state_guard.endpoint_status.get(&new_status.endpoint) {
+            let mut updated = existing_status.clone();
             if new_status.available {
-                updated_status.update_with_check_result(Some(new_status.latency), None);
+                updated.update_with_check_result(Some(new_status.latency), None);
             } else {
-                updated_status.update_with_check_result(None, new_status.error.clone());
+                updated.update_with_check_result(None, new_status.error.clone());
             }
-            Some(updated_status)
+            updated
         } else {
             // First time seeing this endpoint - use new status but ensure it has the measurement
-            let mut first_time_status = new_status.clone();
+            let mut first_time = new_status.clone();
             if new_status.available {
-                first_time_status.update_with_check_result(Some(new_status.latency), None);
+                first_time.update_with_check_result(Some(new_status.latency), None);
             } else {
-                first_time_status.update_with_check_result(None, new_status.error.clone());
+                first_time.update_with_check_result(None, new_status.error.clone());
             }
-            Some(first_time_status)
-        }
+            first_time
+        };
+
+        // Update the state with the merged status in the same lock scope
+        state_guard.endpoint_status.insert(updated_status.endpoint.clone(), updated_status.clone());
+        
+        Some(updated_status)
     }
 
     #[allow(dead_code)]
@@ -567,6 +579,22 @@ impl HealthCheckOrchestrator {
                 state_guard.switch_endpoint_silent(status.endpoint.clone());
             } else {
                 state_guard.switch_endpoint(status.endpoint.clone());
+            }
+
+            // Clean up orphaned connections after endpoint switch
+            if let Some(ref tracker) = self.connection_tracker {
+                if let Ok(mut tracker_guard) = tracker.lock() {
+                    let orphaned = tracker_guard.cleanup_orphaned_connections(&status.endpoint);
+                    if !orphaned.is_empty() {
+                        if !self.dashboard_mode {
+                            println!("🧹 Cleaned up {} orphaned connections after endpoint switch", orphaned.len());
+                        }
+                        // Send cleanup event for each orphaned connection
+                        for connection_id in orphaned {
+                            let _ = event_sender.send(ProxyEvent::ConnectionCompleted(connection_id));
+                        }
+                    }
+                }
             }
 
             let _ = event_sender.send(ProxyEvent::EndpointSwitch {
