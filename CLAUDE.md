@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+**IMPORTANT**: Always ask for explicit permission before running `git push` - never push to remote repository without user confirmation.
+
 ## Project Overview
 
 **Claude Zephyr** is an automatic endpoint switching tool for Claude API built in **Rust**. It provides automatic endpoint selection, health monitoring, and graceful failover capabilities. The tool automatically routes requests to the best available endpoint based on real-time latency measurements.
