@@ -213,34 +213,6 @@ A: In dashboard mode, press M key to switch to manual mode, then use ↑↓+Ente
 **Q: After pressing ESC during usage, why do connections sometimes still show as active?**
 A: The system has multi-layer automatic cleanup mechanisms. ESC-interrupted connections usually clean up automatically within 15-30 seconds. If connection records persist for more than 1 minute, you can manually refresh health checks (press R key in dashboard mode) to force cleanup.
 
-## Pre-release Preparation
-
-If you want to release this project, please update the following configurations first:
-
-### Required file modifications:
-1. **Cargo.toml** - All fields correctly configured:
-   ```toml
-   repository = "https://github.com/BeaconSage/claude-zephyr"
-   authors = ["Claude Zephyr Maintainers"]
-   homepage = "https://github.com/BeaconSage/claude-zephyr"
-   documentation = "https://github.com/BeaconSage/claude-zephyr"
-   ```
-
-2. **README.md** - Updated clone command with username:
-   ```bash
-   git clone https://github.com/BeaconSage/claude-zephyr.git
-   ```
-
-3. **CHANGELOG.md** - Updated release date:
-   ```markdown
-   ## [0.1.0] - 2024-12-01
-   ```
-
-### Optional optimizations:
-- Add actual test files (if needed)
-- Update copyright information in LICENSE
-- Add project screenshots to README
-
 ## Development
 
 ```bash

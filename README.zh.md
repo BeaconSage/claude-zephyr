@@ -212,34 +212,6 @@ A: 在仪表板模式下按M键切换到手动模式，然后用↑↓+Enter选�
 **Q: 使用过程中按ESC中断后，为什么有时还会显示连接中？**
 A: 系统有多层自动清理机制，ESC中断的连接通常会在15-30秒内自动清理完成。如果连接记录持续存在超过1分钟，可以手动刷新健康检查（仪表板模式按R键）来强制清理。
 
-## 发布前准备
-
-如果你要发布这个项目，请先更新以下配置：
-
-### 必须修改的文件：
-1. **Cargo.toml** - 所有字段已正确配置：
-   ```toml
-   repository = "https://github.com/BeaconSage/claude-zephyr"
-   authors = ["Claude Zephyr Maintainers"]
-   homepage = "https://github.com/BeaconSage/claude-zephyr"
-   documentation = "https://github.com/BeaconSage/claude-zephyr"
-   ```
-
-2. **README.md** - 更新克隆命令中的用户名：
-   ```bash
-   git clone https://github.com/BeaconSage/claude-zephyr.git
-   ```
-
-3. **CHANGELOG.md** - 更新发布日期：
-   ```markdown
-   ## [0.1.0] - 2024-12-01
-   ```
-
-### 可选优化：
-- 添加实际的测试文件（如果需要）
-- 更新LICENSE中的版权信息
-- 添加项目截图到README中
-
 ## 开发
 
 ```bash
