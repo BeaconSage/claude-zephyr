@@ -9,6 +9,7 @@ mod health_orchestrator;
 mod i18n;
 mod logging;
 mod proxy;
+mod signal_handler;
 
 use clap::Parser;
 use config::Config;
@@ -18,6 +19,7 @@ use events::ProxyEvent;
 use health_orchestrator::HealthCheckOrchestrator;
 use logging::*;
 use proxy::{ProxyState, SharedState};
+use signal_handler::GracefulShutdown;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
@@ -155,13 +157,16 @@ async fn run_normal_mode(
     connection_tracker: SharedConnectionTracker,
     event_sender: mpsc::UnboundedSender<ProxyEvent>,
 ) -> anyhow::Result<()> {
+    // Create graceful shutdown handler
+    let shutdown_handler = GracefulShutdown::new(connection_tracker.clone(), event_sender.clone());
+
     // Start health check orchestrator (normal mode - with console logs)
     let health_state = state.clone();
     let health_config = config.clone();
     let health_sender = event_sender.clone();
     let health_tracker = connection_tracker.clone();
 
-    let (_health_orchestrator, _orchestrator_command_sender) = HealthCheckOrchestrator::new(
+    let (health_orchestrator, _orchestrator_command_sender) = HealthCheckOrchestrator::new(
         health_config,
         health_state,
         health_sender,
@@ -169,12 +174,21 @@ async fn run_normal_mode(
         Some(health_tracker),
     );
 
+    // Start health check orchestrator task
     tokio::spawn(async move {
-        if let Err(e) = _health_orchestrator.run().await {
+        if let Err(e) = health_orchestrator.run().await {
             tracing::error!("Health check orchestrator error: {}", e);
         }
     });
 
-    // Start proxy server (existing behavior with events)
-    proxy::start_proxy_server_with_events(config, state, connection_tracker, event_sender).await
+    // Start proxy server with signal handling
+    tokio::select! {
+        result = proxy::start_proxy_server_with_events(config, state, connection_tracker, event_sender) => {
+            result
+        }
+        _ = shutdown_handler.wait_for_shutdown() => {
+            println!("✅ Graceful shutdown completed");
+            Ok(())
+        }
+    }
 }

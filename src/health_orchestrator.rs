@@ -72,6 +72,39 @@ impl HealthCheckOrchestrator {
         // Start immediately instead of waiting for the first interval
         let mut next_check = tokio::time::Instant::now();
 
+        // Start a frequent interrupt detection task for faster cleanup
+        if let Some(ref tracker) = self.connection_tracker {
+            let interrupt_tracker = tracker.clone();
+            let interrupt_sender = self.event_sender.clone();
+            let interrupt_dashboard_mode = self.dashboard_mode;
+
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(10)); // Check every 10 seconds
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+                loop {
+                    interval.tick().await;
+
+                    // Quick cleanup for very recent interrupts (15 seconds)
+                    if let Ok(mut tracker_guard) = interrupt_tracker.lock() {
+                        let very_recent_abandoned = tracker_guard.cleanup_abandoned_connections(15);
+                        if !very_recent_abandoned.is_empty() {
+                            if !interrupt_dashboard_mode {
+                                println!(
+                                    "⚡ Fast cleanup: {} recently interrupted connections",
+                                    very_recent_abandoned.len()
+                                );
+                            }
+                            for connection_id in very_recent_abandoned {
+                                let _ = interrupt_sender
+                                    .send(ProxyEvent::ConnectionCompleted(connection_id));
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
         loop {
             // Handle commands and check pause state
             tokio::select! {
@@ -303,7 +336,26 @@ impl HealthCheckOrchestrator {
                     }
                     // Send cleanup events for stale connections
                     for connection_id in stale {
-                        let _ = self.event_sender.send(ProxyEvent::ConnectionCompleted(connection_id));
+                        let _ = self
+                            .event_sender
+                            .send(ProxyEvent::ConnectionCompleted(connection_id));
+                    }
+                }
+
+                // Also cleanup abandoned connections (30 seconds of inactivity - for ESC/user interrupts)
+                let abandoned = tracker_guard.cleanup_abandoned_connections(30); // 30 seconds for faster cleanup
+                if !abandoned.is_empty() {
+                    if !self.dashboard_mode {
+                        println!(
+                            "🧹 Cleaned up {} abandoned connections (likely interrupted)",
+                            abandoned.len()
+                        );
+                    }
+                    // Send cleanup events for abandoned connections
+                    for connection_id in abandoned {
+                        let _ = self
+                            .event_sender
+                            .send(ProxyEvent::ConnectionCompleted(connection_id));
                     }
                 }
             }
@@ -471,29 +523,32 @@ impl HealthCheckOrchestrator {
         state: &SharedState,
     ) -> Option<EndpointStatus> {
         let mut state_guard = state.lock().ok()?;
-        
-        let updated_status = if let Some(existing_status) = state_guard.endpoint_status.get(&new_status.endpoint) {
-            let mut updated = existing_status.clone();
-            if new_status.available {
-                updated.update_with_check_result(Some(new_status.latency), None);
+
+        let updated_status =
+            if let Some(existing_status) = state_guard.endpoint_status.get(&new_status.endpoint) {
+                let mut updated = existing_status.clone();
+                if new_status.available {
+                    updated.update_with_check_result(Some(new_status.latency), None);
+                } else {
+                    updated.update_with_check_result(None, new_status.error.clone());
+                }
+                updated
             } else {
-                updated.update_with_check_result(None, new_status.error.clone());
-            }
-            updated
-        } else {
-            // First time seeing this endpoint - use new status but ensure it has the measurement
-            let mut first_time = new_status.clone();
-            if new_status.available {
-                first_time.update_with_check_result(Some(new_status.latency), None);
-            } else {
-                first_time.update_with_check_result(None, new_status.error.clone());
-            }
-            first_time
-        };
+                // First time seeing this endpoint - use new status but ensure it has the measurement
+                let mut first_time = new_status.clone();
+                if new_status.available {
+                    first_time.update_with_check_result(Some(new_status.latency), None);
+                } else {
+                    first_time.update_with_check_result(None, new_status.error.clone());
+                }
+                first_time
+            };
 
         // Update the state with the merged status in the same lock scope
-        state_guard.endpoint_status.insert(updated_status.endpoint.clone(), updated_status.clone());
-        
+        state_guard
+            .endpoint_status
+            .insert(updated_status.endpoint.clone(), updated_status.clone());
+
         Some(updated_status)
     }
 
@@ -587,11 +642,15 @@ impl HealthCheckOrchestrator {
                     let orphaned = tracker_guard.cleanup_orphaned_connections(&status.endpoint);
                     if !orphaned.is_empty() {
                         if !self.dashboard_mode {
-                            println!("🧹 Cleaned up {} orphaned connections after endpoint switch", orphaned.len());
+                            println!(
+                                "🧹 Cleaned up {} orphaned connections after endpoint switch",
+                                orphaned.len()
+                            );
                         }
                         // Send cleanup event for each orphaned connection
                         for connection_id in orphaned {
-                            let _ = event_sender.send(ProxyEvent::ConnectionCompleted(connection_id));
+                            let _ =
+                                event_sender.send(ProxyEvent::ConnectionCompleted(connection_id));
                         }
                     }
                 }
@@ -667,6 +726,14 @@ impl HealthCheckOrchestrator {
         }
 
         Ok(())
+    }
+
+    /// Record a request for load tracking (reserved for future use)
+    #[allow(dead_code)]
+    pub fn record_request(&mut self) {
+        if let Some(ref mut checker) = self.dynamic_checker {
+            checker.record_request();
+        }
     }
 
     fn prepare_next_cycle(&self) {

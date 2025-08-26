@@ -50,21 +50,28 @@ impl LoadMetrics {
             0
         };
 
-        // Determine new load level based on both active connections and request rate
+        // Determine new load level based on active connections
+        // Since each connection typically represents a request, connection count is a good proxy for load
+        // We still maintain the request rate capability for future enhancements
         let requests_last_minute = self.get_request_rate();
-        let new_load_level = match (active_count, requests_last_minute as u32) {
-            // High load: Many concurrent connections OR high request rate
-            (conn, _) if conn > 10 => LoadLevel::High,
-            (_, req_rate) if req_rate > 30 => LoadLevel::High, // >30 requests/minute
-
-            // Medium load: Moderate concurrent connections OR moderate request rate
-            (conn, req_rate) if conn >= 4 || req_rate >= 10 => LoadLevel::Medium,
-
-            // Low load: Few connections but some request activity
-            (conn, req_rate) if conn > 0 || req_rate >= 2 => LoadLevel::Low,
-
-            // Idle: No connections and very few or no requests
-            _ => LoadLevel::Idle,
+        let new_load_level = if active_count > 10 {
+            // High load: Many concurrent connections (>10 indicates heavy usage)
+            LoadLevel::High
+        } else if active_count >= 4 {
+            // Medium load: Moderate concurrent connections (4-10 indicates active usage)
+            LoadLevel::Medium
+        } else if active_count >= 1 {
+            // Low load: Few connections (1-3 indicates light usage)
+            LoadLevel::Low
+        } else {
+            // No active connections, check if we have recent explicit request records
+            if requests_last_minute >= 10.0 {
+                LoadLevel::Medium // High request rate but no current connections
+            } else if requests_last_minute >= 2.0 {
+                LoadLevel::Low // Some request activity
+            } else {
+                LoadLevel::Idle // Truly idle
+            }
         };
 
         // Update if load level changed
@@ -74,7 +81,7 @@ impl LoadMetrics {
         }
     }
 
-    /// Record a new request for load tracking
+    /// Record a new request for load tracking (reserved for future use)
     #[allow(dead_code)]
     pub fn record_request(&mut self) {
         self.recent_requests.push_back(Instant::now());
@@ -158,22 +165,33 @@ impl DynamicHealthChecker {
                 }
             }
             LoadLevel::Idle => {
-                // Idle: progressive increase based on how long we've been idle
+                // Idle: progressive scaling from base_interval to max_interval based on idle duration
                 let idle_duration = Instant::now() - self.load_metrics.last_load_change;
-                if idle_duration > Duration::from_secs(1800) {
-                    // 30 minutes
-                    6.0 // 30s * 6.0 = 180s (3 minutes)
-                } else if idle_duration > Duration::from_secs(600) {
-                    // 10 minutes
-                    4.0 // 30s * 4.0 = 120s (2 minutes)
-                } else if idle_duration > Duration::from_secs(180) {
-                    // 3 minutes
-                    3.0 // 30s * 3.0 = 90s (1.5 minutes)
-                } else if idle_duration > Duration::from_secs(60) {
-                    // 1 minute
-                    2.5 // 30s * 2.5 = 75s
+
+                // Define idle duration thresholds for progressive scaling
+                let idle_secs = idle_duration.as_secs();
+                let base_secs = self.base_interval.as_secs() as f64;
+                let max_secs = self.max_interval.as_secs() as f64;
+
+                // Progressive scaling based on idle duration
+                if idle_secs <= 60 {
+                    // First minute: use base interval
+                    1.0
+                } else if idle_secs <= 300 {
+                    // 1-5 minutes: gentle increase (base * 1.5)
+                    1.0 + 0.5 * ((idle_secs - 60) as f64 / 240.0)
+                } else if idle_secs <= 900 {
+                    // 5-15 minutes: moderate increase (base * 1.5 to base * 3.0)
+                    1.5 + 1.5 * ((idle_secs - 300) as f64 / 600.0)
+                } else if idle_secs <= 1800 {
+                    // 15-30 minutes: significant increase (base * 3.0 to base * 8.0)
+                    3.0 + 5.0 * ((idle_secs - 900) as f64 / 900.0)
                 } else {
-                    1.0 // Use base interval (30s) for first minute of idle
+                    // 30+ minutes: approach maximum interval
+                    // Gradually approach max_secs/base_secs ratio
+                    let max_scaling = max_secs / base_secs;
+                    let progress = ((idle_secs - 1800) as f64 / 1800.0).min(1.0); // Cap at 1.0
+                    8.0 + (max_scaling - 8.0) * progress
                 }
             }
         };
@@ -192,7 +210,7 @@ impl DynamicHealthChecker {
         }
     }
 
-    /// Record a new request for load tracking
+    /// Record a new request for load tracking (reserved for future use)
     #[allow(dead_code)]
     pub fn record_request(&mut self) {
         self.load_metrics.record_request();

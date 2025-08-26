@@ -1,7 +1,7 @@
 use crate::events::{ActiveConnection, ConnectionStatus};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 use tokio::sync::mpsc;
 
@@ -121,7 +121,7 @@ impl ConnectionTracker {
         for conn in self.active.values() {
             // Count connections per endpoint
             *endpoint_counts.entry(conn.endpoint.clone()).or_insert(0) += 1;
-            
+
             // Calculate connection duration
             let duration_seconds = (current_time - conn.start_time).num_seconds() as u64;
             duration_stats.push(duration_seconds);
@@ -163,6 +163,51 @@ impl ConnectionTracker {
         }
 
         orphaned_connections
+    }
+
+    /// Force cleanup all active connections (for shutdown scenarios)
+    pub fn force_cleanup_all_connections(&mut self) -> Vec<String> {
+        let connection_ids: Vec<String> = self.active.keys().cloned().collect();
+
+        for id in &connection_ids {
+            self.active.remove(id);
+        }
+
+        // Clear endpoint distribution
+        self.endpoint_distribution.clear();
+
+        connection_ids
+    }
+
+    /// Check for connections that should be considered abandoned (longer idle time)
+    pub fn cleanup_abandoned_connections(&mut self, max_idle_seconds: u64) -> Vec<String> {
+        let current_time = chrono::Utc::now();
+        let mut abandoned = Vec::new();
+
+        let abandoned_ids: Vec<String> = self
+            .active
+            .iter()
+            .filter(|(_, conn)| {
+                let idle_seconds = (current_time - conn.start_time).num_seconds() as u64;
+                idle_seconds > max_idle_seconds
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        for id in abandoned_ids {
+            if let Some(connection) = self.active.remove(&id) {
+                // Update endpoint distribution
+                if let Some(count) = self.endpoint_distribution.get_mut(&connection.endpoint) {
+                    *count = count.saturating_sub(1);
+                    if *count == 0 {
+                        self.endpoint_distribution.remove(&connection.endpoint);
+                    }
+                }
+                abandoned.push(id);
+            }
+        }
+
+        abandoned
     }
 
     /// Clean up connections that have been running for too long (safety mechanism)

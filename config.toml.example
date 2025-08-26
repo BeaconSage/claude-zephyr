@@ -43,10 +43,12 @@ endpoints = [
 
 # ============ 高级配置 (可选，通常无需修改) ============
 [health_check]
-# interval_seconds = 60              # 健康检查间隔
-# timeout_seconds = 15               # 健康检查超时
-# dynamic_scaling = true             # 自动调整检查频率
-# claude_binary_path = "claude"      # Claude CLI 路径
+# interval_seconds = 60              # 健康检查间隔（默认：60秒）
+# min_interval_seconds = 30          # 最小间隔，高负载时使用（默认：30秒）
+# max_interval_seconds = 3600         # 最大间隔，长时间空闲时使用（默认：1小时）
+# timeout_seconds = 15               # 健康检查超时（默认：15秒）
+# dynamic_scaling = true             # 自动调整检查频率（默认：false）
+# claude_binary_path = "claude"      # Claude CLI 路径（默认：claude）
 
 # switch_threshold_ms = 50           # 切换阈值(毫秒)
 # graceful_switch_timeout_ms = 30000 # 优雅切换超时
@@ -70,3 +72,8 @@ endpoints = [
 #
 # 4. 可选功能:
 #    - 大部分高级配置都有合理默认值
+#    - dynamic_scaling: 启用后会根据连接负载自动调整检查间隔
+#      * 高负载时: 使用 min_interval_seconds (默认30秒)
+#      * 空闲时: 渐进增加至 max_interval_seconds (默认1小时)
+#      * 算法会在min和max之间平滑过渡，避免突变
+#      * 长时间空闲可大幅节省成本，支持开着过夜

@@ -15,7 +15,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **src/proxy.rs**: HTTP proxy server and request handling
 - **src/dashboard.rs**: TUI dashboard for real-time monitoring
 - **src/health_orchestrator.rs**: Health check orchestration and endpoint switching logic
-- **src/connection_tracker.rs**: Active connection tracking and management
+- **src/connection_tracker.rs**: Active connection tracking and management with intelligent cleanup
+- **src/signal_handler.rs**: Signal handling and graceful shutdown management
 - **config.toml**: Configuration file for endpoint groups, auth tokens, and settings
 
 ### Key Features
@@ -26,7 +27,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Graceful Failover**: Seamless switching with active connection tracking
 - **Multi-Group Support**: Configure multiple endpoint groups with different auth tokens
 - **Dynamic Health Checks**: Adaptive check frequency based on connection load
+  - Configurable min/max intervals with smooth scaling between them
+  - High load: uses min_interval for quick detection
+  - Idle periods: gradually increases to max_interval for cost savings (up to 1 hour by default)
 - **Connection Tracking**: Monitor active connections and their status
+- **Intelligent Connection Cleanup**: Automatic detection and cleanup of interrupted connections
+- **Graceful Shutdown**: SIGINT/SIGTERM signal handling with proper cleanup
 - **Configuration-Driven**: All settings in TOML configuration file
 
 ## Setup and Configuration
@@ -134,9 +140,11 @@ tail -f /var/log/claude-zephyr.log
 
 ### Health Check Section
 - `interval_seconds`: Health check frequency (default: 120s)
+- `min_interval_seconds`: Minimum interval for dynamic scaling (default: 30s)  
+- `max_interval_seconds`: Maximum interval for dynamic scaling (default: 3600s / 1 hour)
 - `timeout_seconds`: Health check timeout (default: 15s)
-- `auth_token`: Anthropic auth token for health checks (will be passed as ANTHROPIC_AUTH_TOKEN environment variable to Claude CLI)
-- `claude_binary_path`: Path to Claude CLI binary
+- `dynamic_scaling`: Enable adaptive check frequency based on connection load (default: false)
+- `claude_binary_path`: Path to Claude CLI binary (default: "claude")
 
 ### Endpoints
 - Array of API endpoint URLs to proxy to

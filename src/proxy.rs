@@ -11,6 +11,20 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use tracing::error;
 
+/// Unified connection cleanup function to ensure proper cleanup in all exit paths
+async fn cleanup_connection_on_exit(
+    connection_id: &str,
+    connection_tracker: &SharedConnectionTracker,
+    event_sender: &EventSender,
+    _reason: &str,
+) {
+    if let Ok(mut tracker) = connection_tracker.lock() {
+        if tracker.complete_connection(connection_id).is_some() {
+            let _ = event_sender.send(ProxyEvent::ConnectionCompleted(connection_id.to_string()));
+        }
+    }
+}
+
 pub type SharedState = Arc<Mutex<ProxyState>>;
 
 #[derive(Debug)]
@@ -373,10 +387,20 @@ async fn proxy_handler_with_events_impl(
 
     // Start connection tracking and set to processing in single lock acquisition
     let active_connection = {
-        let mut tracker = connection_tracker.lock().unwrap();
-        let connection = tracker.start_connection(connection_id.clone(), endpoint_for_request.clone());
-        tracker.update_connection_status(&connection_id, ConnectionStatus::Processing);
-        connection
+        match connection_tracker.lock() {
+            Ok(mut tracker) => {
+                let connection =
+                    tracker.start_connection(connection_id.clone(), endpoint_for_request.clone());
+                tracker.update_connection_status(&connection_id, ConnectionStatus::Processing);
+                connection
+            }
+            Err(e) => {
+                tracing::error!("Failed to acquire connection tracker lock: {}", e);
+                return Ok(Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::from("Internal server error"))?);
+            }
+        }
     };
 
     // Send connection started event
@@ -399,7 +423,8 @@ async fn proxy_handler_with_events_impl(
     let timeout_duration = std::time::Duration::from_secs(300); // 5 minutes
     let response = tokio::time::timeout(timeout_duration, client.request(new_req)).await;
 
-    match response {
+    // Handle all possible outcomes with unified cleanup
+    let result = match response {
         Ok(Ok(mut resp)) => {
             // Response headers received, but AI might still be generating content
             // Keep status as Processing during body transmission
@@ -407,45 +432,80 @@ async fn proxy_handler_with_events_impl(
             // For streaming responses, we need to consume the entire body to ensure
             // the connection represents the true end-to-end time
             // Apply timeout to body consumption as well to prevent hanging on stalled streams
-            let body_bytes = tokio::time::timeout(
+            match tokio::time::timeout(
                 std::time::Duration::from_secs(300), // Same 5-minute timeout
                 hyper::body::to_bytes(resp.body_mut()),
             )
-            .await??;
-
-            // NOW the AI has finished generating and transmitting - update to finishing
+            .await
             {
-                let mut tracker = connection_tracker.lock().unwrap();
-                tracker.update_connection_status(&connection_id, ConnectionStatus::Finishing);
+                Ok(Ok(body_bytes)) => {
+                    // NOW the AI has finished generating and transmitting - update to finishing
+                    if let Ok(mut tracker) = connection_tracker.lock() {
+                        tracker
+                            .update_connection_status(&connection_id, ConnectionStatus::Finishing);
+                    }
+
+                    let new_body = Body::from(body_bytes);
+
+                    // Create new response with the consumed body
+                    let (parts, _) = resp.into_parts();
+                    let final_response = Response::from_parts(parts, new_body);
+
+                    // Successful completion - cleanup will be handled by unified function
+                    cleanup_connection_on_exit(
+                        &connection_id,
+                        &connection_tracker,
+                        &event_sender,
+                        "success",
+                    )
+                    .await;
+                    Ok(final_response)
+                }
+                Ok(Err(e)) => {
+                    // Body consumption error
+                    if !silent_mode {
+                        log_proxy_error(
+                            &endpoint_for_request,
+                            &format!("Body consumption error: {e}"),
+                        );
+                    }
+                    cleanup_connection_on_exit(
+                        &connection_id,
+                        &connection_tracker,
+                        &event_sender,
+                        "body_error",
+                    )
+                    .await;
+                    Ok(Response::builder()
+                        .status(StatusCode::BAD_GATEWAY)
+                        .body(Body::from("Body consumption error"))?)
+                }
+                Err(_) => {
+                    // Body consumption timeout
+                    if !silent_mode {
+                        log_proxy_error(&endpoint_for_request, "Body consumption timeout");
+                    }
+                    cleanup_connection_on_exit(
+                        &connection_id,
+                        &connection_tracker,
+                        &event_sender,
+                        "body_timeout",
+                    )
+                    .await;
+                    Ok(Response::builder()
+                        .status(StatusCode::GATEWAY_TIMEOUT)
+                        .body(Body::from("Body consumption timeout"))?)
+                }
             }
-
-            let new_body = Body::from(body_bytes);
-
-            // Create new response with the consumed body
-            let (parts, _) = resp.into_parts();
-            let final_response = Response::from_parts(parts, new_body);
-
-            // Complete connection tracking - connection is truly finished
-            {
-                let mut tracker = connection_tracker.lock().unwrap();
-                tracker.complete_connection(&connection_id);
-            }
-
-            // Send connection completed event
-            let _ = event_sender.send(ProxyEvent::ConnectionCompleted(connection_id.clone()));
-
-            Ok(final_response)
         }
         Ok(Err(e)) => {
             // HTTP request error
-            // Log proxy error only if not in silent mode
             if !silent_mode {
                 log_proxy_error(&endpoint_for_request, &format!("HTTP error: {e}"));
             }
 
             // Mark the endpoint we actually used as failed
-            {
-                let mut state_guard = state.lock().unwrap();
+            if let Ok(mut state_guard) = state.lock() {
                 if let Some(status) = state_guard.endpoint_status.get_mut(&endpoint_for_request) {
                     status.available = false;
                     status.error = Some(format!("HTTP error: {e}"));
@@ -453,22 +513,19 @@ async fn proxy_handler_with_events_impl(
                 }
             }
 
-            // Complete connection tracking even on error
-            {
-                let mut tracker = connection_tracker.lock().unwrap();
-                tracker.complete_connection(&connection_id);
-            }
-
-            // Send connection completed event
-            let _ = event_sender.send(ProxyEvent::ConnectionCompleted(connection_id.clone()));
-
+            cleanup_connection_on_exit(
+                &connection_id,
+                &connection_tracker,
+                &event_sender,
+                "http_error",
+            )
+            .await;
             Ok(Response::builder()
                 .status(StatusCode::BAD_GATEWAY)
                 .body(Body::from("HTTP error"))?)
         }
         Err(_timeout) => {
-            // Timeout error
-            // Log proxy error only if not in silent mode
+            // Request timeout
             if !silent_mode {
                 log_proxy_error(&endpoint_for_request, "Request timeout (5 minutes)");
             }
@@ -483,20 +540,20 @@ async fn proxy_handler_with_events_impl(
                 }
             }
 
-            // Complete connection tracking on timeout
-            {
-                let mut tracker = connection_tracker.lock().unwrap();
-                tracker.complete_connection(&connection_id);
-            }
-
-            // Send connection completed event
-            let _ = event_sender.send(ProxyEvent::ConnectionCompleted(connection_id.clone()));
-
+            cleanup_connection_on_exit(
+                &connection_id,
+                &connection_tracker,
+                &event_sender,
+                "request_timeout",
+            )
+            .await;
             Ok(Response::builder()
                 .status(StatusCode::GATEWAY_TIMEOUT)
                 .body(Body::from("Request timeout"))?)
         }
-    }
+    };
+
+    result
 }
 
 async fn proxy_handler_with_events(
@@ -593,8 +650,7 @@ async fn proxy_handler(
             log_proxy_error(&endpoint_for_request, &format!("HTTP error: {e}"));
 
             // Mark the endpoint we actually used as failed
-            {
-                let mut state_guard = state.lock().unwrap();
+            if let Ok(mut state_guard) = state.lock() {
                 if let Some(status) = state_guard.endpoint_status.get_mut(&endpoint_for_request) {
                     status.available = false;
                     status.error = Some(format!("HTTP error: {e}"));
@@ -629,9 +685,12 @@ async fn proxy_handler(
 async fn diagnostics_handler(
     connection_tracker: SharedConnectionTracker,
 ) -> anyhow::Result<Response<Body>> {
-    let diagnostics = {
-        let tracker = connection_tracker.lock().unwrap();
+    let diagnostics = if let Ok(tracker) = connection_tracker.lock() {
         tracker.get_connection_diagnostics()
+    } else {
+        return Ok(Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(Body::from("Failed to access connection tracker"))?);
     };
 
     let response_json = serde_json::json!({
@@ -642,10 +701,10 @@ async fn diagnostics_handler(
             "completed_count": diagnostics.completed_count,
             "peak_concurrent": diagnostics.peak_concurrent,
             "longest_connection_seconds": diagnostics.duration_stats.iter().max().unwrap_or(&0),
-            "average_duration_seconds": if diagnostics.duration_stats.is_empty() { 
-                0 
-            } else { 
-                diagnostics.duration_stats.iter().sum::<u64>() / diagnostics.duration_stats.len() as u64 
+            "average_duration_seconds": if diagnostics.duration_stats.is_empty() {
+                0
+            } else {
+                diagnostics.duration_stats.iter().sum::<u64>() / diagnostics.duration_stats.len() as u64
             }
         }
     });
@@ -660,7 +719,15 @@ async fn status_handler(
     state: SharedState,
     connection_tracker: Option<SharedConnectionTracker>,
 ) -> anyhow::Result<Response<Body>> {
-    let state_guard = state.lock().unwrap();
+    let state_guard = match state.lock() {
+        Ok(guard) => guard,
+        Err(e) => {
+            tracing::error!("Failed to acquire state lock: {}", e);
+            return Ok(Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from("Internal server error"))?);
+        }
+    };
 
     // Get connection info from tracker if available, otherwise use old system for backwards compatibility
     let (total_active_connections, endpoint_distribution) =

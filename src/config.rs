@@ -351,9 +351,7 @@ impl Config {
 
     pub fn max_health_check_interval(&self) -> Duration {
         Duration::from_secs(
-            self.health_check
-                .max_interval_seconds
-                .unwrap_or(self.health_check.interval_seconds * 2),
+            self.health_check.max_interval_seconds.unwrap_or(3600), // Default to 1 hour - reasonable for idle periods
         )
     }
 
