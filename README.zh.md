@@ -27,7 +27,7 @@ cp .env.example.instcopilot .env
 
 # 4. 编译启动（需要Rust环境）
 cargo build --release
-./target/release/claude-zephyr --dashboard
+./target/release/claude-zephyr
 
 # 5. 使用代理
 export ANTHROPIC_BASE_URL="http://localhost:8080"
@@ -117,10 +117,7 @@ AUTH_TOKEN_BACKUP=another-auth-token-if-needed
 # 编译项目
 cargo build --release
 
-# 仪表板模式（推荐）- 实时监控界面
-./target/release/claude-zephyr --dashboard
-
-# 命令行模式（后台运行，查看日志）
+# 启动交互式仪表板（默认）
 ./target/release/claude-zephyr
 ```
 
@@ -133,18 +130,48 @@ claude -p "Hello Claude"
 
 ## 使用方式
 
-### 仪表板模式（推荐）
-实时图形监控界面：
-- 查看所有端点状态和延迟
-- 手动选择特定端点（↑↓键移动，Enter确认）
-- 监控活跃连接情况
-- 切换自动/手动模式（按M键）
+Claude Zephyr **默认以交互式仪表板模式运行**，提供实时监控和控制功能。
 
-### 命令行模式
-后台运行，通过日志查看状态：
-- 自动检测各端点健康状态
-- 自动切换到最快的可用端点
-- 显示详细的切换日志
+**启动应用程序：**
+```bash
+# 默认：交互式仪表板模式
+./target/release/claude-zephyr
+
+# 可选：指定自定义配置文件
+./target/release/claude-zephyr --config /path/to/config.toml
+```
+
+### 仪表板功能
+**交互式实时监控界面（终端用户界面 TUI）**
+
+**核心功能：**
+- **实时监控**：实时查看所有端点状态、延迟和健康趋势
+- **交互控制**：使用键盘快捷键进行即时控制
+- **连接跟踪**：监控活跃连接和详细状态信息
+- **手动覆盖**：在自动和手动端点选择之间切换
+
+**交互控制：**
+```bash
+# 导航和控制
+Q       - 退出应用程序
+R       - 手动健康检查刷新
+P       - 暂停/恢复监控（停止健康检查）
+M       - 在自动/手动模式之间切换
+↑↓      - 导航端点列表（移动光标）
+Enter   - 确认端点选择（在手动模式下）
+
+# 使用示例：
+# 1. 按 'M' 键切换到手动模式
+# 2. 使用 '↑↓' 键选择所需端点
+# 3. 按 'Enter' 键确认选择
+# 4. 再次按 'M' 键返回自动模式
+```
+
+**适用场景：**
+- 日常使用和监控
+- 开发和测试环境
+- 交互式调试和性能监控
+- 手动端点管理和故障排除
 
 ## 配置说明
 

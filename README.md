@@ -28,7 +28,7 @@ cp .env.example.instcopilot .env
 
 # 4. Build and start (requires Rust environment)
 cargo build --release
-./target/release/claude-zephyr --dashboard
+./target/release/claude-zephyr
 
 # 5. Use the proxy
 export ANTHROPIC_BASE_URL="http://localhost:8080"
@@ -118,10 +118,7 @@ AUTH_TOKEN_BACKUP=another-auth-token-if-needed
 # Build the project
 cargo build --release
 
-# Dashboard mode (recommended) - Real-time monitoring interface
-./target/release/claude-zephyr --dashboard
-
-# Command line mode (background running, view logs)
+# Start with interactive dashboard (default)
 ./target/release/claude-zephyr
 ```
 
@@ -134,18 +131,48 @@ claude -p "Hello Claude"
 
 ## Usage
 
-### Dashboard Mode (Recommended)
-Real-time graphical monitoring interface:
-- View all endpoint status and latency
-- Manually select specific endpoints (↑↓ keys to move, Enter to confirm)
-- Monitor active connection status
-- Switch between auto/manual mode (press M key)
+Claude Zephyr runs with an **interactive dashboard by default**, providing real-time monitoring and control capabilities.
 
-### Command Line Mode
-Background operation, view status through logs:
-- Automatically detect endpoint health status
-- Automatically switch to fastest available endpoint
-- Show detailed switching logs
+**Start the application:**
+```bash
+# Default: Interactive dashboard mode
+./target/release/claude-zephyr
+
+# Optional: specify custom config file
+./target/release/claude-zephyr --config /path/to/config.toml
+```
+
+### Dashboard Features
+**Interactive real-time monitoring interface with TUI (Terminal User Interface)**
+
+**Key Features:**
+- **Real-time Monitoring**: Live view of all endpoint status, latency, and health trends
+- **Interactive Controls**: Use keyboard shortcuts for immediate control
+- **Connection Tracking**: Monitor active connections with detailed status information
+- **Manual Override**: Switch between automatic and manual endpoint selection
+
+**Interactive Controls:**
+```bash
+# Navigation and Control
+Q       - Quit the application
+R       - Manual health check refresh
+P       - Pause/Resume monitoring (stops health checks)
+M       - Toggle between Auto/Manual mode
+↑↓      - Navigate endpoint list (move cursor)
+Enter   - Confirm endpoint selection (in manual mode)
+
+# Usage Example:
+# 1. Press 'M' to switch to manual mode
+# 2. Use '↑↓' keys to select desired endpoint
+# 3. Press 'Enter' to confirm selection
+# 4. Press 'M' again to return to auto mode
+```
+
+**When to use:**
+- Daily usage and monitoring
+- Development and testing environments  
+- Interactive debugging and performance monitoring
+- Manual endpoint management and troubleshooting
 
 ## Configuration
 

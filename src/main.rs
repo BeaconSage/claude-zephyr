@@ -27,9 +27,9 @@ use tokio::sync::mpsc;
 #[command(name = "claude-zephyr")]
 #[command(about = "Automatic endpoint switching for Claude API")]
 struct Args {
-    /// Enable TUI dashboard mode
-    #[arg(long, help = "Run with interactive dashboard")]
-    dashboard: bool,
+    /// Run in headless mode (for development only)
+    #[arg(long, help = "Run in headless mode without TUI dashboard (development use)")]
+    headless: bool,
 
     /// Run timing self-test
     #[arg(long, help = "Run health check timing self-test")]
@@ -46,22 +46,22 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Initialize logging based on mode
-    if !args.dashboard {
-        // Normal mode: enable beautiful logging
+    if args.headless {
+        // Headless mode: enable beautiful logging
         tracing_subscriber::fmt::init();
     }
     // Dashboard mode: no console logging to avoid interfering with TUI
 
     // Load configuration
     let config = Config::load_default().map_err(|e| {
-        if !args.dashboard {
+        if args.headless {
             log_config_error(&format!("Failed to load configuration: {e}"));
         }
         eprintln!("Please create a config.toml file or ensure the auth token is properly set.");
         e
     })?;
 
-    if !args.dashboard {
+    if args.headless {
         let total_endpoints: usize = config.groups.iter().map(|g| g.endpoints.len()).sum();
         log_config_loaded(total_endpoints);
     }
@@ -78,9 +78,12 @@ async fn main() -> anyhow::Result<()> {
 
     let state = Arc::new(Mutex::new(ProxyState::new(config.clone())));
 
-    // Check if dashboard mode is enabled
-    if args.dashboard {
-        // Run in dashboard mode
+    // Check if headless mode is enabled (for development)
+    if args.headless {
+        // Run in headless mode (development use)
+        run_normal_mode(config, state, connection_tracker, event_sender).await
+    } else {
+        // Run in dashboard mode (default behavior)
         run_with_dashboard(
             config,
             state,
@@ -89,9 +92,6 @@ async fn main() -> anyhow::Result<()> {
             event_receiver,
         )
         .await
-    } else {
-        // Run in normal mode (existing behavior)
-        run_normal_mode(config, state, connection_tracker, event_sender).await
     }
 }
 
