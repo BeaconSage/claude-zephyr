@@ -28,7 +28,10 @@ use tokio::sync::mpsc;
 #[command(about = "Automatic endpoint switching for Claude API")]
 struct Args {
     /// Run in headless mode (for development only)
-    #[arg(long, help = "Run in headless mode without TUI dashboard (development use)")]
+    #[arg(
+        long,
+        help = "Run in headless mode without TUI dashboard (development use)"
+    )]
     headless: bool,
 
     /// Run timing self-test
