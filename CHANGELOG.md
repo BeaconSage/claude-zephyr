@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.1] - 2025-08-27
+
+### Added
+- Dashboard mode is now the default user experience
+- Added `--headless` flag for development and automation scenarios
+
+### Changed  
+- **BREAKING**: Default behavior now launches interactive dashboard instead of headless mode
+- Simplified user documentation to focus on dashboard interface
+- Removed complex command-line usage examples from user-facing docs
+
+### Documentation
+- Updated README.md and README.zh.md for new default behavior
+- Added comprehensive release process documentation (RELEASE_PROCESS.md)
+- Established develop branch for ongoing development
+
 ## [0.1.0] - TBD
 
 ### Added
