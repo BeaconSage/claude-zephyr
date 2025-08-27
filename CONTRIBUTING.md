@@ -51,9 +51,12 @@ We use Git Flow with the following branch structure:
 # Clone and setup
 git clone your-fork-url
 cd claude-zephyr
-cargo build
 
-# Run tests
+# Setup pre-commit hooks (one-time)
+./scripts/setup-hooks.sh
+
+# Build and test
+cargo build
 cargo test
 
 # Run with default dashboard mode
