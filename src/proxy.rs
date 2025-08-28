@@ -366,13 +366,22 @@ async fn handle_request(
     }
 }
 
+/// Retry result that indicates whether to try fallback endpoints
+#[derive(Debug)]
+#[allow(dead_code)]
+enum RetryResult {
+    Success(Response<Body>),
+    FailedEndpoint(hyper::Error), // This endpoint failed, try others
+    FinalError(hyper::Error),     // All retries failed, no fallback needed
+}
+
 /// Retry wrapper for HTTP requests with exponential backoff
 async fn retry_request<F, Fut>(
     config: &crate::config::RetryConfig,
     endpoint: &str,
     silent_mode: bool,
     request_fn: F,
-) -> Result<Response<Body>, hyper::Error>
+) -> RetryResult
 where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = Result<Response<Body>, hyper::Error>>,
@@ -382,7 +391,10 @@ where
     };
 
     if !config.enabled || config.max_attempts <= 1 {
-        return request_fn().await;
+        return match request_fn().await {
+            Ok(response) => RetryResult::Success(response),
+            Err(error) => RetryResult::FailedEndpoint(error),
+        };
     }
 
     let mut last_error = None;
@@ -428,7 +440,7 @@ where
                 if attempt > 1 && !silent_mode {
                     log_retry_success(endpoint, attempt, total_delay_ms);
                 }
-                return Ok(response);
+                return RetryResult::Success(response);
             }
             Err(error) => {
                 if let Some(retryable_error) = classify_error(&error) {
@@ -469,18 +481,216 @@ where
                 if !silent_mode {
                     log_retry_exhausted(endpoint, config.max_attempts, &format!("{:?}", error));
                 }
-                return Err(error);
+                return RetryResult::FailedEndpoint(error);
             }
         }
     }
 
     // This should never be reached, but handle it gracefully
-    // Since we can't easily create hyper::Error, just use the first attempt's error
     let final_error = last_error.unwrap_or_else(|| panic!("No error available in retry logic"));
     if !silent_mode {
         log_retry_exhausted(endpoint, config.max_attempts, &format!("{:?}", final_error));
     }
-    Err(final_error)
+    RetryResult::FailedEndpoint(final_error)
+}
+
+/// Try request with fallback endpoints when the primary endpoint fails
+#[allow(clippy::too_many_arguments)]
+async fn try_with_fallback_endpoints(
+    body_bytes: hyper::body::Bytes,
+    state: &SharedState,
+    client: &Client<HttpsConnector<hyper::client::HttpConnector>>,
+    method: hyper::Method,
+    path_and_query: Option<&str>,
+    headers_template: &hyper::HeaderMap,
+    version: hyper::Version,
+    retry_config: &crate::config::RetryConfig,
+    silent_mode: bool,
+    current_endpoint: &str,
+) -> Result<Response<Body>, hyper::Error> {
+    use crate::logging::{log_endpoint_switch, log_proxy_error, log_proxy_request};
+
+    // Get all available endpoints from the state, prioritizing healthy ones
+    let available_endpoints = {
+        let state_guard = state.lock().unwrap();
+        let mut endpoints = Vec::new();
+
+        // First, try the current endpoint (already attempted, but may work with different timing)
+        if let Some(token) = state_guard
+            .config
+            .get_all_endpoints()
+            .iter()
+            .find(|(_, endpoint, _)| endpoint.url == current_endpoint)
+            .map(|(token, _, _)| token)
+        {
+            endpoints.push((current_endpoint.to_string(), token.clone(), false));
+            // false = already tried
+        }
+
+        // Then add other healthy endpoints
+        for (token, endpoint, _) in state_guard.config.get_all_endpoints() {
+            if endpoint.url != current_endpoint {
+                if let Some(status) = state_guard.endpoint_status.get(&endpoint.url) {
+                    if status.available {
+                        endpoints.push((endpoint.url.clone(), token, true)); // true = new attempt
+                    }
+                }
+            }
+        }
+
+        // Finally, add unhealthy endpoints as last resort
+        for (token, endpoint, _) in state_guard.config.get_all_endpoints() {
+            if endpoint.url != current_endpoint {
+                let is_already_added = endpoints.iter().any(|(url, _, _)| url == &endpoint.url);
+                if !is_already_added {
+                    endpoints.push((endpoint.url.clone(), token, true)); // true = new attempt
+                }
+            }
+        }
+
+        endpoints
+    };
+
+    let total_timeout = std::time::Duration::from_secs(600); // 10 minutes total
+    let start_time = std::time::Instant::now();
+
+    for (endpoint_url, auth_token, is_new_attempt) in available_endpoints {
+        // Check if we're running out of total time
+        if start_time.elapsed() >= total_timeout {
+            if !silent_mode {
+                log_proxy_error(&endpoint_url, "Total request timeout exceeded (10 minutes)");
+            }
+            break;
+        }
+
+        // Skip the current endpoint on first iteration (already failed)
+        if endpoint_url == current_endpoint && !is_new_attempt {
+            continue;
+        }
+
+        // Log endpoint switch for new attempts
+        if endpoint_url != current_endpoint && !silent_mode {
+            log_endpoint_switch(current_endpoint, &endpoint_url, 999999, 0);
+        }
+
+        // Build the target URI
+        let uri_string = format!("{}{}", endpoint_url, path_and_query.unwrap_or(""));
+
+        let uri: Uri = match uri_string.parse() {
+            Ok(uri) => uri,
+            Err(_) => continue, // Skip invalid URIs
+        };
+
+        // Create request function for this endpoint
+        let body_bytes_for_req = body_bytes.clone();
+        let client_for_req = client.clone();
+        let uri_for_req = uri.clone();
+        let mut headers_for_req = headers_template.clone();
+        let method_for_req = method.clone();
+        let version_for_req = version;
+        let auth_token_for_req = auth_token.clone();
+
+        // Update headers for this endpoint
+        let host = endpoint_url
+            .strip_prefix("https://")
+            .or_else(|| endpoint_url.strip_prefix("http://"))
+            .unwrap_or(&endpoint_url);
+        if let Ok(host_value) = host.parse() {
+            headers_for_req.insert("host", host_value);
+        }
+
+        // Update authorization header
+        headers_for_req.remove("authorization");
+        if !auth_token_for_req.is_empty() {
+            let auth_value = format!("Bearer {}", auth_token_for_req);
+            if let Ok(auth_header) = auth_value.parse() {
+                headers_for_req.insert("authorization", auth_header);
+            }
+        }
+
+        let request_fn = move || {
+            let body_bytes = body_bytes_for_req.clone();
+            let client = client_for_req.clone();
+            let uri = uri_for_req.clone();
+            let headers = headers_for_req.clone();
+            let method = method_for_req.clone();
+            let version = version_for_req;
+
+            async move {
+                // Build new request using builder pattern
+                let mut request_builder = hyper::Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .version(version);
+
+                // Add all headers
+                for (name, value) in headers.iter() {
+                    request_builder = request_builder.header(name, value);
+                }
+
+                let new_req = request_builder
+                    .body(Body::from(body_bytes))
+                    .expect("Failed to build request from valid parts");
+
+                // Set timeout for individual requests (5 minutes each)
+                let timeout_duration = std::time::Duration::from_secs(300);
+                match tokio::time::timeout(timeout_duration, client.request(new_req)).await {
+                    Ok(result) => result,
+                    Err(_timeout) => {
+                        // Create a timeout error by making a request to invalid URL
+                        client
+                            .request(hyper::Request::get("").body(Body::empty()).unwrap())
+                            .await
+                    }
+                }
+            }
+        };
+
+        // Log request if it's a new endpoint attempt
+        if !silent_mode {
+            log_proxy_request(&endpoint_url);
+        }
+
+        // Try this endpoint with retry logic
+        match retry_request(retry_config, &endpoint_url, silent_mode, request_fn).await {
+            RetryResult::Success(response) => {
+                // Success! Update the current endpoint in state if different
+                if endpoint_url != current_endpoint {
+                    if let Ok(mut state_guard) = state.lock() {
+                        state_guard.switch_endpoint_silent(endpoint_url.clone());
+                    }
+                }
+                return Ok(response);
+            }
+            RetryResult::FailedEndpoint(_error) => {
+                // This endpoint failed, mark it as failed and try next
+                if let Ok(mut state_guard) = state.lock() {
+                    if let Some(status) = state_guard.endpoint_status.get_mut(&endpoint_url) {
+                        status.available = false;
+                        status.error = Some(format!("HTTP error: {}", _error));
+                        status.last_check = chrono::Utc::now();
+                    }
+                }
+                continue;
+            }
+            RetryResult::FinalError(error) => {
+                // This should not happen in our current implementation
+                return Err(error);
+            }
+        }
+    }
+
+    // All endpoints failed
+    if !silent_mode {
+        log_proxy_error("all-endpoints", "All endpoints failed after retry attempts");
+    }
+
+    // Return a generic connection error since all endpoints failed
+    // We need to create a hyper error somehow - use the timeout approach
+    let client_for_error = client.clone();
+    client_for_error
+        .request(hyper::Request::get("").body(Body::empty()).unwrap())
+        .await
 }
 
 async fn proxy_handler_with_events_impl(
@@ -583,7 +793,38 @@ async fn proxy_handler_with_events_impl(
 
     // Log proxy request only if not in silent mode
     if !silent_mode {
-        log_proxy_request(&endpoint_for_request);
+        // Get detail level from config
+        let detail_level = {
+            let state_guard = state
+                .lock()
+                .map_err(|e| anyhow::anyhow!("Failed to acquire state lock: {}", e))?;
+            state_guard.config.logging.detail_level.clone()
+        };
+
+        // Log detailed request information
+        let path = parts
+            .uri
+            .path_and_query()
+            .map(|pq| pq.as_str())
+            .unwrap_or("/");
+        let request_start_time = std::time::Instant::now();
+
+        log_proxy_request_detailed(
+            &endpoint_for_request,
+            &parts.method,
+            path,
+            &connection_id,
+            Some(&parts.headers),
+            if body_bytes.is_empty() {
+                None
+            } else {
+                Some(&body_bytes)
+            },
+            &detail_level,
+        );
+
+        // Store start time for response logging
+        parts.extensions.insert(request_start_time);
     }
 
     // Create a closure for the request execution that can be retried
@@ -634,7 +875,7 @@ async fn proxy_handler_with_events_impl(
         }
     };
 
-    // Execute request with retry logic
+    // Execute request with enhanced retry logic (cross-endpoint fallback)
     let response = retry_request(
         &retry_config,
         &endpoint_for_request,
@@ -643,9 +884,9 @@ async fn proxy_handler_with_events_impl(
     )
     .await;
 
-    // Handle all possible outcomes with unified cleanup
+    // Handle response with enhanced fallback logic
     let result = match response {
-        Ok(mut resp) => {
+        RetryResult::Success(mut resp) => {
             // Response headers received, but AI might still be generating content
             // Keep status as Processing during body transmission
 
@@ -665,11 +906,40 @@ async fn proxy_handler_with_events_impl(
                             .update_connection_status(&connection_id, ConnectionStatus::Finishing);
                     }
 
+                    // Keep a clone for logging before the body is moved
+                    let body_bytes_for_logging = body_bytes.clone();
                     let new_body = Body::from(body_bytes);
 
                     // Create new response with the consumed body
-                    let (parts, _) = resp.into_parts();
-                    let final_response = Response::from_parts(parts, new_body);
+                    let (response_parts, _) = resp.into_parts();
+                    let final_response = Response::from_parts(response_parts, new_body);
+
+                    // Log detailed response information only if not in silent mode
+                    if !silent_mode {
+                        // Get detail level from config
+                        let detail_level = {
+                            let state_guard = state.lock().map_err(|e| {
+                                anyhow::anyhow!("Failed to acquire state lock: {}", e)
+                            })?;
+                            state_guard.config.logging.detail_level.clone()
+                        };
+
+                        // Calculate response time if we stored the start time
+                        let response_time = parts
+                            .extensions
+                            .get::<std::time::Instant>()
+                            .map(|start_time| start_time.elapsed());
+
+                        log_proxy_response_detailed(
+                            &endpoint_for_request,
+                            final_response.status().as_u16(),
+                            &connection_id,
+                            response_time.map(|d| d.as_millis() as u64).unwrap_or(0),
+                            Some(final_response.headers()),
+                            Some(&body_bytes_for_logging),
+                            &detail_level,
+                        );
+                    }
 
                     // Successful completion - cleanup will be handled by unified function
                     cleanup_connection_on_exit(
@@ -718,34 +988,154 @@ async fn proxy_handler_with_events_impl(
                 }
             }
         }
-        Err(e) => {
-            // HTTP request error (already went through retry logic)
+        RetryResult::FailedEndpoint(_e) => {
+            // Primary endpoint failed after retries, try fallback endpoints
             if !silent_mode {
                 log_proxy_error(
                     &endpoint_for_request,
-                    &format!("HTTP error after retries: {e}"),
+                    &format!("Primary endpoint failed, trying fallbacks: {}", _e),
                 );
             }
 
-            // Mark the endpoint we actually used as failed
+            // Mark the primary endpoint as failed
             if let Ok(mut state_guard) = state.lock() {
                 if let Some(status) = state_guard.endpoint_status.get_mut(&endpoint_for_request) {
                     status.available = false;
-                    status.error = Some(format!("HTTP error: {e}"));
+                    status.error = Some(format!("HTTP error: {}", _e));
                     status.last_check = chrono::Utc::now();
                 }
+            }
+
+            // Try fallback endpoints with cross-endpoint retry
+            match try_with_fallback_endpoints(
+                body_bytes,
+                &state,
+                &client,
+                parts.method,
+                parts.uri.path_and_query().map(|pq| pq.as_str()),
+                &parts.headers,
+                parts.version,
+                &retry_config,
+                silent_mode,
+                &endpoint_for_request,
+            )
+            .await
+            {
+                Ok(mut fallback_resp) => {
+                    // Successfully got response from fallback endpoint
+                    // Consume the body with timeout
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(300),
+                        hyper::body::to_bytes(fallback_resp.body_mut()),
+                    )
+                    .await
+                    {
+                        Ok(Ok(body_bytes)) => {
+                            // Success with fallback endpoint
+                            if let Ok(mut tracker) = connection_tracker.lock() {
+                                tracker.update_connection_status(
+                                    &connection_id,
+                                    ConnectionStatus::Finishing,
+                                );
+                            }
+
+                            let new_body = Body::from(body_bytes);
+                            let (response_parts, _) = fallback_resp.into_parts();
+                            let final_response = Response::from_parts(response_parts, new_body);
+
+                            cleanup_connection_on_exit(
+                                &connection_id,
+                                &connection_tracker,
+                                &event_sender,
+                                "fallback_success",
+                            )
+                            .await;
+                            Ok(final_response)
+                        }
+                        Ok(Err(e)) => {
+                            // Fallback body consumption error
+                            if !silent_mode {
+                                log_proxy_error(
+                                    "fallback-endpoint",
+                                    &format!("Fallback body consumption error: {e}"),
+                                );
+                            }
+                            cleanup_connection_on_exit(
+                                &connection_id,
+                                &connection_tracker,
+                                &event_sender,
+                                "fallback_body_error",
+                            )
+                            .await;
+                            Ok(Response::builder()
+                                .status(StatusCode::BAD_GATEWAY)
+                                .body(Body::from("Fallback body consumption error"))?)
+                        }
+                        Err(_) => {
+                            // Fallback body consumption timeout
+                            if !silent_mode {
+                                log_proxy_error(
+                                    "fallback-endpoint",
+                                    "Fallback body consumption timeout",
+                                );
+                            }
+                            cleanup_connection_on_exit(
+                                &connection_id,
+                                &connection_tracker,
+                                &event_sender,
+                                "fallback_body_timeout",
+                            )
+                            .await;
+                            Ok(Response::builder()
+                                .status(StatusCode::GATEWAY_TIMEOUT)
+                                .body(Body::from("Fallback body consumption timeout"))?)
+                        }
+                    }
+                }
+                Err(_fallback_error) => {
+                    // All endpoints failed (including fallbacks)
+                    if !silent_mode {
+                        log_proxy_error(
+                            "all-endpoints",
+                            &format!(
+                                "All endpoints failed: primary={}, fallback={}",
+                                _e, _fallback_error
+                            ),
+                        );
+                    }
+
+                    cleanup_connection_on_exit(
+                        &connection_id,
+                        &connection_tracker,
+                        &event_sender,
+                        "all_endpoints_failed",
+                    )
+                    .await;
+                    Ok(Response::builder()
+                        .status(StatusCode::SERVICE_UNAVAILABLE)
+                        .body(Body::from("All endpoints unavailable"))?)
+                }
+            }
+        }
+        RetryResult::FinalError(e) => {
+            // This should rarely happen, but handle it gracefully
+            if !silent_mode {
+                log_proxy_error(
+                    &endpoint_for_request,
+                    &format!("Final error after retries: {e}"),
+                );
             }
 
             cleanup_connection_on_exit(
                 &connection_id,
                 &connection_tracker,
                 &event_sender,
-                "http_error",
+                "final_error",
             )
             .await;
             Ok(Response::builder()
                 .status(StatusCode::BAD_GATEWAY)
-                .body(Body::from("HTTP error"))?)
+                .body(Body::from("Request failed"))?)
         }
     };
 
@@ -770,7 +1160,8 @@ async fn proxy_handler_with_events_dashboard(
     connection_tracker: SharedConnectionTracker,
     event_sender: EventSender,
 ) -> anyhow::Result<Response<Body>> {
-    proxy_handler_with_events_impl(req, state, client, connection_tracker, event_sender, true).await
+    proxy_handler_with_events_impl(req, state, client, connection_tracker, event_sender, false)
+        .await
 }
 
 #[allow(dead_code)]

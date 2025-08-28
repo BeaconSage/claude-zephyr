@@ -24,10 +24,19 @@ LINES=50
 JSON_MODE=false
 SHOW_STATS=true
 SIMPLE_MODE=true
+CUSTOM_LOG_FILE=""
+
+# 新增的查看模式参数
+VIEW_MODE="tail"        # tail, head, all, around
+FOLLOW_MODE=true        # 是否实时跟踪
+USE_PAGER=false         # 是否使用分页器
+AROUND_LINE=""          # --around 选项的行号
 
 # 确定使用哪个日志文件
 determine_log_file() {
-    if [ -f "$TODAY_LOG" ]; then
+    if [ -n "$CUSTOM_LOG_FILE" ]; then
+        LOG_FILE="$CUSTOM_LOG_FILE"
+    elif [ -f "$TODAY_LOG" ]; then
         LOG_FILE="$TODAY_LOG"
     elif [ -f "$MAIN_LOG" ]; then
         LOG_FILE="$MAIN_LOG"
@@ -59,14 +68,32 @@ show_help() {
     echo "  --performance      显示性能分析"
     echo ""
     echo -e "${YELLOW}输出选项:${NC}"
+    echo "  -f, --file PATH    指定日志文件路径"
     echo "  -n, --lines N      显示最近N行 (默认: 50)"
     echo "  -j, --json         JSON格式输出"
     echo "  --no-stats         禁用统计显示"
+    echo ""
+    echo -e "${PURPLE}查看模式:${NC}"
+    echo "  --history          查看完整历史日志（不跟踪新内容）"
+    echo "  --all-content      显示完整内容然后跟踪新内容"
+    echo "  --from-start       从文件开头开始显示"
+    echo "  --head N           显示文件开头N行"
+    echo "  --around LINE      显示指定行周围内容"
+    echo "  --pager            使用分页器浏览（支持搜索和滚动）"
+    echo "  --no-follow        仅查看内容，不跟踪新日志"
     echo ""
     echo -e "${CYAN}使用示例:${NC}"
     echo "  $0                 # 快速启动，查看所有日志"
     echo "  $0 -p              # 只看代理请求"
     echo "  $0 -r -n 100       # 最近100行重试日志"
+    echo "  $0 -f logs/claude-zephyr.2025-08-27  # 监控指定日期的日志"
+    echo "  $0 --file custom.log -p              # 指定文件+过滤代理请求"
+    echo ""
+    echo -e "${CYAN}历史日志查看:${NC}"
+    echo "  $0 -f old.log --history --pager      # 分页浏览完整历史日志"
+    echo "  $0 -f old.log --head 100 -p          # 查看开头100行代理请求"
+    echo "  $0 -f old.log --all-content -e       # 完整内容+跟踪错误日志"
+    echo "  $0 -f old.log --around 500 --no-follow  # 查看第500行周围内容"
     echo "  $0 --proxy-stats   # 代理统计分析"
     echo ""
     echo -e "${GREEN}Emoji图例:${NC}"
@@ -78,25 +105,60 @@ show_help() {
 # 检查日志文件
 check_log_file() {
     if [ ! -f "$LOG_FILE" ]; then
-        echo -e "${RED}❌ 日志文件不存在: $LOG_FILE${NC}"
-        echo -e "${YELLOW}💡 请确保:${NC}"
-        echo "   1. 配置文件中 file_enabled = true"
-        echo "   2. Claude Zephyr 服务已启动"
-        echo "   3. 日志目录有写入权限"
-        echo ""
-        echo -e "${CYAN}🚀 启动命令:${NC}"
-        echo "   cargo run                  # TUI仪表板模式"
-        echo "   cargo run -- --headless    # 控制台模式"
-        echo ""
-        echo -e "${BLUE}🔍 查找现有日志文件:${NC}"
-        find logs -name "claude-zephyr*" -type f 2>/dev/null | head -5 || echo "   无日志文件"
+        if [ -n "$CUSTOM_LOG_FILE" ]; then
+            # 用户指定了自定义文件但文件不存在
+            echo -e "${RED}❌ 指定的日志文件不存在: $LOG_FILE${NC}"
+            echo -e "${YELLOW}💡 请检查:${NC}"
+            echo "   1. 文件路径是否正确"
+            echo "   2. 文件是否存在和可读"
+            echo "   3. 是否有访问权限"
+            echo ""
+            
+            # 尝试提供一些有用的建议
+            local dir_name=$(dirname "$LOG_FILE")
+            if [ -d "$dir_name" ]; then
+                echo -e "${BLUE}🔍 在目录 $dir_name 中找到的日志文件:${NC}"
+                find "$dir_name" -name "*log*" -type f 2>/dev/null | head -5 || echo "   无相关日志文件"
+            else
+                echo -e "${BLUE}🔍 在当前目录中找到的日志文件:${NC}"
+                find . -name "*log*" -type f 2>/dev/null | head -5 || echo "   无日志文件"
+            fi
+        else
+            # 自动检测模式下文件不存在
+            echo -e "${RED}❌ 日志文件不存在: $LOG_FILE${NC}"
+            echo -e "${YELLOW}💡 请确保:${NC}"
+            echo "   1. 配置文件中 file_enabled = true"
+            echo "   2. Claude Zephyr 服务已启动"
+            echo "   3. 日志目录有写入权限"
+            echo ""
+            echo -e "${CYAN}🚀 启动命令:${NC}"
+            echo "   cargo run                  # TUI仪表板模式"
+            echo "   cargo run -- --headless    # 控制台模式"
+            echo ""
+            echo -e "${BLUE}🔍 查找现有日志文件:${NC}"
+            find logs -name "claude-zephyr*" -type f 2>/dev/null | head -5 || echo "   无日志文件"
+        fi
         return 1
     fi
+    
+    # 检查文件是否可读
+    if [ ! -r "$LOG_FILE" ]; then
+        echo -e "${RED}❌ 无法读取日志文件: $LOG_FILE${NC}"
+        echo -e "${YELLOW}💡 权限问题，请检查文件访问权限${NC}"
+        return 1
+    fi
+    
     return 0
 }
 
 # 等待日志文件创建
 wait_for_log_file() {
+    # 如果用户指定了自定义文件，不要等待，直接返回失败
+    if [ -n "$CUSTOM_LOG_FILE" ]; then
+        echo -e "${RED}⚠️  指定的日志文件不存在，无法等待创建${NC}"
+        return 1
+    fi
+    
     echo -e "${YELLOW}⏰ 等待日志文件创建: $LOG_FILE${NC}"
     
     # 等待日志文件创建，最多等待60秒
@@ -322,6 +384,54 @@ while [[ $# -gt 0 ]]; do
             fi
             shift 2
             ;;
+        -f|--file)
+            CUSTOM_LOG_FILE="$2"
+            if [ -z "$CUSTOM_LOG_FILE" ]; then
+                echo -e "${RED}错误: --file 选项需要指定文件路径${NC}"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --history)
+            VIEW_MODE="all"
+            FOLLOW_MODE=false
+            shift
+            ;;
+        --all-content)
+            VIEW_MODE="all"
+            FOLLOW_MODE=true
+            shift
+            ;;
+        --from-start)
+            VIEW_MODE="all"
+            shift
+            ;;
+        --head)
+            VIEW_MODE="head"
+            LINES="$2"
+            if ! [[ "$LINES" =~ ^[0-9]+$ ]]; then
+                echo -e "${RED}错误: --head 参数必须是数字${NC}"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --around)
+            VIEW_MODE="around"
+            AROUND_LINE="$2"
+            if ! [[ "$AROUND_LINE" =~ ^[0-9]+$ ]]; then
+                echo -e "${RED}错误: --around 参数必须是数字${NC}"
+                exit 1
+            fi
+            shift 2
+            ;;
+        --pager)
+            USE_PAGER=true
+            shift
+            ;;
+        --no-follow)
+            FOLLOW_MODE=false
+            shift
+            ;;
         *)
             echo -e "${RED}未知选项: $1${NC}"
             echo "使用 -h 或 --help 查看帮助"
@@ -353,38 +463,134 @@ fi
 echo -e "${BLUE}📝 文件: $LOG_FILE${NC}"
 echo -e "${PURPLE}⏰ 时间: $(date)${NC}"
 
+# 显示查看模式信息
+case "$VIEW_MODE" in
+    "head")
+        echo -e "${GREEN}📖 查看模式: 显示开头 $LINES 行${NC}"
+        ;;
+    "around")
+        echo -e "${GREEN}📖 查看模式: 显示第 $AROUND_LINE 行周围内容${NC}"
+        ;;
+    "all")
+        if [ "$FOLLOW_MODE" = true ]; then
+            echo -e "${GREEN}📖 查看模式: 完整内容 + 实时跟踪${NC}"
+        else
+            echo -e "${GREEN}📖 查看模式: 完整历史内容${NC}"
+        fi
+        ;;
+    "tail"|*)
+        if [ "$FOLLOW_MODE" = true ]; then
+            echo -e "${GREEN}📖 查看模式: 最后 $LINES 行 + 实时跟踪${NC}"
+        else
+            echo -e "${GREEN}📖 查看模式: 最后 $LINES 行${NC}"
+        fi
+        ;;
+esac
+
+if [ "$USE_PAGER" = true ]; then
+    echo -e "${BLUE}📄 使用分页器浏览（按 q 退出，/ 搜索）${NC}"
+fi
+
 if [ -n "$FILTER" ]; then
     echo -e "${YELLOW}🎯 过滤器: $FILTER${NC}"
 fi
 
-echo -e "${GREEN}📺 按 Ctrl+C 退出${NC}"
+if [ "$FOLLOW_MODE" = false ]; then
+    echo -e "${CYAN}📺 静态查看模式（不跟踪新内容）${NC}"
+else
+    echo -e "${GREEN}📺 按 Ctrl+C 退出${NC}"
+fi
 echo ""
 
 # 显示统计信息
 show_stats
 
+# 根据查看模式显示日志内容
+display_log_content() {
+    local log_file="$1"
+    local filter="$2"
+    
+    # 检查是否使用分页器
+    if [ "$USE_PAGER" = true ]; then
+        if ! command -v less &> /dev/null; then
+            echo -e "${YELLOW}⚠️  less 未安装，使用标准输出${NC}"
+            USE_PAGER=false
+        fi
+    fi
+    
+    # 构建基础命令
+    local base_cmd=""
+    local follow_cmd=""
+    
+    case "$VIEW_MODE" in
+        "head")
+            base_cmd="head -n $LINES"
+            ;;
+        "around")
+            local start_line=$((AROUND_LINE - 25))
+            local end_line=$((AROUND_LINE + 25))
+            if [ $start_line -lt 1 ]; then start_line=1; fi
+            base_cmd="sed -n '${start_line},${end_line}p'"
+            ;;
+        "all")
+            base_cmd="cat"
+            ;;
+        "tail"|*)
+            base_cmd="tail -n $LINES"
+            ;;
+    esac
+    
+    # 添加跟踪模式
+    if [ "$FOLLOW_MODE" = true ] && [ "$VIEW_MODE" != "head" ] && [ "$VIEW_MODE" != "around" ]; then
+        if [ "$VIEW_MODE" = "all" ]; then
+            # 对于全内容模式，先显示完整内容，再跟踪新内容
+            follow_cmd="&& tail -n 0 -f"
+        else
+            # 对于 tail 模式，直接使用 -f
+            base_cmd="tail -n $LINES -f"
+        fi
+    fi
+    
+    # 构建完整命令
+    local display_cmd="$base_cmd \"$log_file\""
+    if [ -n "$follow_cmd" ]; then
+        display_cmd="$base_cmd \"$log_file\" $follow_cmd \"$log_file\""
+    fi
+    
+    # 添加过滤器
+    if [ -n "$filter" ]; then
+        if [ "$FOLLOW_MODE" = true ] && [ "$VIEW_MODE" = "all" ]; then
+            # 特殊处理全内容+跟踪模式的过滤
+            display_cmd="($base_cmd \"$log_file\" | grep -E \"$filter\") && (tail -n 0 -f \"$log_file\" | grep --line-buffered -E \"$filter\")"
+        else
+            display_cmd="$display_cmd | grep --line-buffered -E \"$filter\""
+        fi
+    fi
+    
+    # 添加颜色化
+    if [ "$JSON_MODE" = true ]; then
+        # JSON模式处理
+        if ! command -v jq &> /dev/null; then
+            echo -e "${RED}❌ JSON模式需要安装 jq${NC}"
+            echo "安装: brew install jq"
+            exit 1
+        fi
+        display_cmd="$display_cmd | jq -r '.'"
+    else
+        display_cmd="$display_cmd | colorize_log"
+    fi
+    
+    # 添加分页器
+    if [ "$USE_PAGER" = true ] && [ "$FOLLOW_MODE" = false ]; then
+        display_cmd="$display_cmd | less -R"
+    fi
+    
+    # 执行命令
+    eval "$display_cmd"
+}
+
 echo -e "${CYAN}────────────────────────────────────${NC}"
 echo ""
 
 # 开始监控日志
-if [ "$JSON_MODE" = true ]; then
-    # JSON 模式 (需要 jq)
-    if ! command -v jq &> /dev/null; then
-        echo -e "${RED}❌ JSON模式需要安装 jq${NC}"
-        echo "安装: brew install jq"
-        exit 1
-    fi
-    
-    if [ -n "$FILTER" ]; then
-        tail -n "$LINES" -f "$LOG_FILE" | grep --line-buffered -E "$FILTER" | jq -r '.'
-    else
-        tail -n "$LINES" -f "$LOG_FILE" | jq -r '.'
-    fi
-else
-    # 普通彩色模式
-    if [ -n "$FILTER" ]; then
-        tail -n "$LINES" -f "$LOG_FILE" | grep --line-buffered -E "$FILTER" | colorize_log
-    else
-        tail -n "$LINES" -f "$LOG_FILE" | colorize_log
-    fi
-fi
+display_log_content "$LOG_FILE" "$FILTER"

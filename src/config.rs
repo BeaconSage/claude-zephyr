@@ -6,6 +6,21 @@ use std::time::Duration;
 
 use crate::i18n::Language;
 
+/// Detail level for proxy request/response logging
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum DetailLevel {
+    /// Basic logging: endpoint URL only (current behavior)
+    #[default]
+    Basic,
+    /// Standard logging: add method, path, status code, timing
+    Standard,
+    /// Detailed logging: add request/response headers
+    Detailed,
+    /// Debug logging: add request/response bodies (with security filtering)
+    Debug,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub server: ServerConfig,
@@ -126,6 +141,9 @@ pub struct LoggingConfig {
     /// Log level (trace, debug, info, warn, error)
     #[serde(default = "default_log_level")]
     pub level: String,
+    /// Detail level for proxy request/response logging
+    #[serde(default)]
+    pub detail_level: DetailLevel,
     /// Enable console output
     #[serde(default = "default_console_enabled")]
     pub console_enabled: bool,
@@ -150,6 +168,7 @@ impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
             level: default_log_level(),
+            detail_level: DetailLevel::default(),
             console_enabled: default_console_enabled(),
             file_enabled: default_file_enabled(),
             file_path: default_file_path(),

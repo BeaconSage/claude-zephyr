@@ -43,13 +43,37 @@ endpoints = [
 
 # ============ Advanced Configuration (Optional, usually no need to modify) ============
 [health_check]
-# interval_seconds = 60              # Health check interval
-# timeout_seconds = 15               # Health check timeout
-# dynamic_scaling = true             # Auto-adjust check frequency
-# claude_binary_path = "claude"      # Claude CLI path
+# interval_seconds = 60              # Health check interval (default: 60s)
+# min_interval_seconds = 30          # Minimum interval for high load (default: 30s)
+# max_interval_seconds = 3600        # Maximum interval for long idle (default: 1 hour)
+# timeout_seconds = 15               # Health check timeout (default: 15s)
+# dynamic_scaling = true             # Auto-adjust check frequency (default: false)
+# claude_binary_path = "claude"      # Claude CLI path (default: claude)
 
 # switch_threshold_ms = 50           # Switch threshold (milliseconds)
 # graceful_switch_timeout_ms = 30000 # Graceful switch timeout
+
+# ============ Retry Configuration (Optional) ============
+[retry]
+# enabled = true                     # Enable retry functionality (default: true)
+# max_attempts = 3                   # Maximum retry attempts including initial request (default: 3)
+# base_delay_ms = 1000              # Base delay time in milliseconds (default: 1000ms)
+# backoff_multiplier = 2.0          # Exponential backoff multiplier (default: 2.0)
+
+# ============ Logging Configuration (Optional) ============
+[logging]
+# level = "info"                     # Log level: trace, debug, info, warn, error (default: info)
+# detail_level = "standard"          # Proxy request detail level (default: basic)
+#                                    #   - basic: Only show endpoint URL
+#                                    #   - standard: Add method, path, status code, response time
+#                                    #   - detailed: Add request/response headers
+#                                    #   - debug: Add request/response body (filters sensitive data)
+# console_enabled = true             # Console output (default: true)
+# file_enabled = false               # File output (default: false)
+# file_path = "logs/claude-zephyr.log"  # Log file path
+# max_file_size = 104857600          # Maximum file size in bytes (default: 100MB)
+# max_files = 10                     # Number of log files to keep (default: 10)
+# json_format = false                # JSON format output (default: false)
 
 # ============ Configuration Notes ============
 # 🔥 Marked items are required configurations
@@ -70,3 +94,10 @@ endpoints = [
 #
 # 4. Optional features:
 #    - Most advanced configurations have reasonable defaults
+#    - dynamic_scaling: When enabled, automatically adjusts check frequency based on connection load
+#      * High load: uses min_interval_seconds (default 30s)
+#      * Idle periods: gradually increases to max_interval_seconds (default 1 hour)
+#      * Algorithm smoothly transitions between min and max to avoid sudden changes
+#      * Long idle periods can significantly save costs, supports overnight operation
+#    - retry: Enables smart retry mechanism with exponential backoff
+#    - logging: Configurable detailed log levels, debug level automatically filters sensitive information

@@ -53,6 +53,28 @@ endpoints = [
 # switch_threshold_ms = 50           # 切换阈值(毫秒)
 # graceful_switch_timeout_ms = 30000 # 优雅切换超时
 
+# ============ 重试配置 (可选) ============
+[retry]
+# enabled = true                     # 启用重试功能（默认：true）
+# max_attempts = 3                   # 最大重试次数，包含初始请求（默认：3）
+# base_delay_ms = 1000              # 基础延迟时间，毫秒（默认：1000ms）
+# backoff_multiplier = 2.0          # 指数退避倍数（默认：2.0）
+
+# ============ 日志配置 (可选) ============
+[logging]
+# level = "info"                     # 日志级别: trace, debug, info, warn, error（默认：info）
+# detail_level = "standard"          # 代理请求详细级别（默认：basic）
+#                                    #   - basic: 仅显示端点URL
+#                                    #   - standard: 添加方法、路径、状态码、响应时间
+#                                    #   - detailed: 添加请求/响应头信息
+#                                    #   - debug: 添加请求/响应体（会过滤敏感信息）
+# console_enabled = true             # 控制台输出（默认：true）
+# file_enabled = false               # 文件输出（默认：false）
+# file_path = "logs/claude-zephyr.log"  # 日志文件路径
+# max_file_size = 104857600          # 最大文件大小，字节（默认：100MB）
+# max_files = 10                     # 保留的日志文件数量（默认：10）
+# json_format = false                # JSON格式输出（默认：false）
+
 # ============ 配置说明 ============
 # 🔥 标记的是必须配置的项目
 # 
@@ -77,3 +99,5 @@ endpoints = [
 #      * 空闲时: 渐进增加至 max_interval_seconds (默认1小时)
 #      * 算法会在min和max之间平滑过渡，避免突变
 #      * 长时间空闲可大幅节省成本，支持开着过夜
+#    - retry: 启用智能重试机制，支持指数退避
+#    - logging: 可配置详细日志级别，debug级别会自动过滤敏感信息
