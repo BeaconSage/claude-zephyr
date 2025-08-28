@@ -126,11 +126,19 @@ curl http://localhost:8080/health
 # View detailed endpoint status
 curl http://localhost:8080/status | jq .
 
-# Monitor logs
-tail -f /var/log/claude-zephyr.log
+# Health check endpoint
+curl http://localhost:8080/health
 
-# Use the monitoring script
-./monitor.sh
+# Real-time log monitoring (separate terminal)
+./watch-logs.sh                 # Simple real-time log viewing
+./monitor-logs.sh               # Advanced monitoring with options
+./monitor-logs.sh -r            # Only retry-related logs
+./monitor-logs.sh -e            # Only error logs
+./monitor-logs.sh -h            # Show all options
+
+# Manual log viewing
+tail -f logs/claude-zephyr.log  # Basic log following
+grep "🔁" logs/claude-zephyr.log # Search retry attempts
 ```
 
 ## Configuration Reference
@@ -147,6 +155,21 @@ tail -f /var/log/claude-zephyr.log
 - `timeout_seconds`: Health check timeout (default: 15s)
 - `dynamic_scaling`: Enable adaptive check frequency based on connection load (default: false)
 - `claude_binary_path`: Path to Claude CLI binary (default: "claude")
+
+### Retry Section
+- `enabled`: Enable automatic retry for proxy requests (default: true)
+- `max_attempts`: Maximum retry attempts including initial request (default: 3)
+- `base_delay_ms`: Base delay between retries in milliseconds (default: 1000)
+- `backoff_multiplier`: Exponential backoff multiplier (default: 2.0)
+
+### Logging Section
+- `level`: Log level: trace, debug, info, warn, error (default: "info")
+- `console_enabled`: Enable console output (default: true)
+- `file_enabled`: Enable file output (default: false)
+- `file_path`: Log file path (default: "logs/claude-zephyr.log")
+- `max_file_size`: Maximum log file size in bytes (default: 100MB)
+- `max_files`: Number of log files to keep (default: 10)
+- `json_format`: Use JSON format for structured logging (default: false)
 
 ### Endpoints
 - Array of API endpoint URLs to proxy to

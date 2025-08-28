@@ -34,21 +34,9 @@ fn init_logging(config: &Config, headless_mode: bool) -> anyhow::Result<()> {
         .or_else(|_| EnvFilter::try_new(&log_config.level))
         .unwrap_or_else(|_| EnvFilter::new("info"));
 
-    // Console output (only if enabled and appropriate for mode)
-    if log_config.console_enabled && headless_mode {
-        if log_config.json_format {
-            tracing_subscriber::fmt()
-                .with_env_filter(env_filter)
-                .json()
-                .init();
-        } else {
-            tracing_subscriber::fmt()
-                .with_env_filter(env_filter)
-                .pretty()
-                .init();
-        }
-    } else if log_config.file_enabled {
-        // File output only
+    // Always enable file logging if configured, regardless of mode
+    if log_config.file_enabled {
+        // File output
         if let Some(parent) = std::path::Path::new(&log_config.file_path).parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -78,10 +66,22 @@ fn init_logging(config: &Config, headless_mode: bool) -> anyhow::Result<()> {
                 .init();
         }
 
-        // Store guard to prevent it from being dropped
         std::mem::forget(_guard);
+    } else if log_config.console_enabled && headless_mode {
+        // Console output only (for headless mode)
+        if log_config.json_format {
+            tracing_subscriber::fmt()
+                .with_env_filter(env_filter)
+                .json()
+                .init();
+        } else {
+            tracing_subscriber::fmt()
+                .with_env_filter(env_filter)
+                .pretty()
+                .init();
+        }
     } else {
-        // Fallback: basic console logging
+        // Fallback: basic console logging (for dashboard mode when file is disabled)
         tracing_subscriber::fmt().with_env_filter(env_filter).init();
     }
 
