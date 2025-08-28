@@ -9,6 +9,9 @@ pub mod log_cat {
     pub const CONFIG: &str = "⚙️";
     pub const ERROR: &str = "❌";
     pub const SUCCESS: &str = "✅";
+    pub const RETRY: &str = "🔁";
+    #[allow(dead_code)]
+    pub const PERFORMANCE: &str = "📊";
 }
 
 /// Health check related logs
@@ -105,11 +108,91 @@ pub fn log_config_loaded(endpoint_count: usize) {
     );
 }
 
+#[allow(dead_code)]
 pub fn log_config_error(error: &str) {
     error!(
         "{} {} Configuration error: {}",
         log_cat::CONFIG,
         log_cat::ERROR,
+        error
+    );
+}
+
+/// Retry related logs
+pub fn log_retry_attempt(endpoint: &str, attempt: u32, max_attempts: u32, reason: &str) {
+    warn!(
+        "{} Retry attempt {}/{} for {}: {}",
+        log_cat::RETRY,
+        attempt,
+        max_attempts,
+        endpoint,
+        reason
+    );
+}
+
+pub fn log_retry_success(endpoint: &str, attempt: u32, total_delay_ms: u64) {
+    info!(
+        "{} {} Retry succeeded for {} on attempt {} (total delay: {}ms)",
+        log_cat::RETRY,
+        log_cat::SUCCESS,
+        endpoint,
+        attempt,
+        total_delay_ms
+    );
+}
+
+pub fn log_retry_exhausted(endpoint: &str, max_attempts: u32, final_error: &str) {
+    error!(
+        "{} {} All {} retry attempts exhausted for {}: {}",
+        log_cat::RETRY,
+        log_cat::ERROR,
+        max_attempts,
+        endpoint,
+        final_error
+    );
+}
+
+pub fn log_retry_delay(endpoint: &str, attempt: u32, delay_ms: u64) {
+    info!(
+        "{} Waiting {}ms before retry attempt {} for {}",
+        log_cat::RETRY,
+        delay_ms,
+        attempt,
+        endpoint
+    );
+}
+
+/// Performance related logs
+#[allow(dead_code)]
+pub fn log_request_start(endpoint: &str, connection_id: &str) {
+    info!(
+        "{} Request started: {} (connection: {})",
+        log_cat::PERFORMANCE,
+        endpoint,
+        connection_id
+    );
+}
+
+#[allow(dead_code)]
+pub fn log_request_completed(endpoint: &str, connection_id: &str, duration_ms: u64, status: u16) {
+    info!(
+        "{} Request completed: {} (connection: {}, {}ms, status: {})",
+        log_cat::PERFORMANCE,
+        endpoint,
+        connection_id,
+        duration_ms,
+        status
+    );
+}
+
+#[allow(dead_code)]
+pub fn log_request_failed(endpoint: &str, connection_id: &str, duration_ms: u64, error: &str) {
+    warn!(
+        "{} Request failed: {} (connection: {}, {}ms, error: {})",
+        log_cat::PERFORMANCE,
+        endpoint,
+        connection_id,
+        duration_ms,
         error
     );
 }

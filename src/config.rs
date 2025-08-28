@@ -13,6 +13,12 @@ pub struct Config {
     pub groups: Vec<Group>,
     /// Global health check config (can be overridden per group)
     pub health_check: HealthCheckConfig,
+    /// Retry configuration for proxy requests
+    #[serde(default)]
+    pub retry: RetryConfig,
+    /// Logging configuration
+    #[serde(default)]
+    pub logging: LoggingConfig,
     /// UI and display settings
     #[serde(default)]
     pub ui: UiConfig,
@@ -86,6 +92,74 @@ pub struct HealthCheckConfig {
     pub claude_binary_path: String,
 }
 
+/// Retry configuration for proxy requests
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryConfig {
+    /// Enable retry functionality
+    #[serde(default = "default_retry_enabled")]
+    pub enabled: bool,
+    /// Maximum number of retry attempts (including initial attempt)
+    #[serde(default = "default_max_attempts")]
+    pub max_attempts: u32,
+    /// Base delay between retries in milliseconds
+    #[serde(default = "default_base_delay_ms")]
+    pub base_delay_ms: u64,
+    /// Multiplier for exponential backoff
+    #[serde(default = "default_backoff_multiplier")]
+    pub backoff_multiplier: f32,
+}
+
+impl Default for RetryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_retry_enabled(),
+            max_attempts: default_max_attempts(),
+            base_delay_ms: default_base_delay_ms(),
+            backoff_multiplier: default_backoff_multiplier(),
+        }
+    }
+}
+
+/// Logging configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoggingConfig {
+    /// Log level (trace, debug, info, warn, error)
+    #[serde(default = "default_log_level")]
+    pub level: String,
+    /// Enable console output
+    #[serde(default = "default_console_enabled")]
+    pub console_enabled: bool,
+    /// Enable file output
+    #[serde(default = "default_file_enabled")]
+    pub file_enabled: bool,
+    /// Log file path
+    #[serde(default = "default_file_path")]
+    pub file_path: String,
+    /// Maximum log file size in bytes
+    #[serde(default = "default_max_file_size")]
+    pub max_file_size: u64,
+    /// Maximum number of log files to keep
+    #[serde(default = "default_max_files")]
+    pub max_files: u32,
+    /// Use JSON format for structured logging
+    #[serde(default = "default_json_format")]
+    pub json_format: bool,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            level: default_log_level(),
+            console_enabled: default_console_enabled(),
+            file_enabled: default_file_enabled(),
+            file_path: default_file_path(),
+            max_file_size: default_max_file_size(),
+            max_files: default_max_files(),
+            json_format: default_json_format(),
+        }
+    }
+}
+
 /// UI configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UiConfig {
@@ -100,6 +174,39 @@ fn default_switch_threshold() -> u64 {
 }
 fn default_graceful_timeout() -> u64 {
     30000
+}
+fn default_retry_enabled() -> bool {
+    true
+}
+fn default_max_attempts() -> u32 {
+    3
+}
+fn default_base_delay_ms() -> u64 {
+    1000
+}
+fn default_backoff_multiplier() -> f32 {
+    2.0
+}
+fn default_log_level() -> String {
+    "info".to_string()
+}
+fn default_console_enabled() -> bool {
+    true
+}
+fn default_file_enabled() -> bool {
+    false
+}
+fn default_file_path() -> String {
+    "logs/claude-zephyr.log".to_string()
+}
+fn default_max_file_size() -> u64 {
+    104_857_600 // 100MB
+}
+fn default_max_files() -> u32 {
+    10
+}
+fn default_json_format() -> bool {
+    false
 }
 
 impl Config {

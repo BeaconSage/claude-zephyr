@@ -23,6 +23,71 @@ use signal_handler::GracefulShutdown;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 
+/// Initialize logging system based on configuration
+fn init_logging(config: &Config, headless_mode: bool) -> anyhow::Result<()> {
+    use tracing_subscriber::EnvFilter;
+
+    let log_config = &config.logging;
+
+    // Parse log level
+    let env_filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new(&log_config.level))
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    // Console output (only if enabled and appropriate for mode)
+    if log_config.console_enabled && headless_mode {
+        if log_config.json_format {
+            tracing_subscriber::fmt()
+                .with_env_filter(env_filter)
+                .json()
+                .init();
+        } else {
+            tracing_subscriber::fmt()
+                .with_env_filter(env_filter)
+                .pretty()
+                .init();
+        }
+    } else if log_config.file_enabled {
+        // File output only
+        if let Some(parent) = std::path::Path::new(&log_config.file_path).parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let file_appender = tracing_appender::rolling::daily(
+            std::path::Path::new(&log_config.file_path)
+                .parent()
+                .unwrap_or(std::path::Path::new(".")),
+            std::path::Path::new(&log_config.file_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("claude-zephyr"),
+        );
+
+        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+        if log_config.json_format {
+            tracing_subscriber::fmt()
+                .with_env_filter(env_filter)
+                .json()
+                .with_writer(non_blocking)
+                .init();
+        } else {
+            tracing_subscriber::fmt()
+                .with_env_filter(env_filter)
+                .with_writer(non_blocking)
+                .init();
+        }
+
+        // Store guard to prevent it from being dropped
+        std::mem::forget(_guard);
+    } else {
+        // Fallback: basic console logging
+        tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    }
+
+    Ok(())
+}
+
 #[derive(Parser)]
 #[command(name = "claude-zephyr")]
 #[command(about = "Automatic endpoint switching for Claude API")]
@@ -48,21 +113,13 @@ async fn main() -> anyhow::Result<()> {
         return dev_tools::test_health_check_timing().await;
     }
 
-    // Initialize logging based on mode
-    if args.headless {
-        // Headless mode: enable beautiful logging
-        tracing_subscriber::fmt::init();
-    }
-    // Dashboard mode: no console logging to avoid interfering with TUI
-
-    // Load configuration
-    let config = Config::load_default().map_err(|e| {
-        if args.headless {
-            log_config_error(&format!("Failed to load configuration: {e}"));
-        }
+    // Load configuration first (for logging setup)
+    let config = Config::load_default().inspect_err(|_e| {
         eprintln!("Please create a config.toml file or ensure the auth token is properly set.");
-        e
     })?;
+
+    // Initialize logging based on configuration and mode
+    init_logging(&config, args.headless)?;
 
     if args.headless {
         let total_endpoints: usize = config.groups.iter().map(|g| g.endpoints.len()).sum();

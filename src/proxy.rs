@@ -9,7 +9,54 @@ use hyper_tls::HttpsConnector;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::time::sleep;
 use tracing::error;
+
+/// Error types that can be retried
+#[derive(Debug)]
+enum RetryableError {
+    /// Network connection errors
+    #[allow(dead_code)]
+    ConnectionError(String),
+    /// Request timeout
+    Timeout,
+    /// 5xx server errors
+    #[allow(dead_code)]
+    ServerError(u16),
+}
+
+/// Error types that should not be retried
+#[derive(Debug)]
+#[allow(dead_code)]
+enum NonRetryableError {
+    /// 4xx client errors
+    ClientError(u16),
+    /// Authentication failures
+    AuthError,
+    /// Malformed request
+    BadRequest(String),
+}
+
+/// Classify error to determine if it should be retried
+fn classify_error(error: &hyper::Error) -> Option<RetryableError> {
+    if error.is_timeout() {
+        return Some(RetryableError::Timeout);
+    }
+
+    if error.is_connect() || error.is_closed() {
+        return Some(RetryableError::ConnectionError(error.to_string()));
+    }
+
+    // For other hyper errors, assume they might be retryable
+    Some(RetryableError::ConnectionError(error.to_string()))
+}
+
+/// Calculate delay for exponential backoff
+fn calculate_backoff_delay(attempt: u32, base_delay_ms: u64, multiplier: f32) -> Duration {
+    let delay_ms = base_delay_ms as f64 * (multiplier as f64).powi(attempt as i32 - 1);
+    Duration::from_millis(delay_ms as u64)
+}
 
 /// Unified connection cleanup function to ensure proper cleanup in all exit paths
 async fn cleanup_connection_on_exit(
@@ -319,6 +366,123 @@ async fn handle_request(
     }
 }
 
+/// Retry wrapper for HTTP requests with exponential backoff
+async fn retry_request<F, Fut>(
+    config: &crate::config::RetryConfig,
+    endpoint: &str,
+    silent_mode: bool,
+    request_fn: F,
+) -> Result<Response<Body>, hyper::Error>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<Response<Body>, hyper::Error>>,
+{
+    use crate::logging::{
+        log_retry_attempt, log_retry_delay, log_retry_exhausted, log_retry_success,
+    };
+
+    if !config.enabled || config.max_attempts <= 1 {
+        return request_fn().await;
+    }
+
+    let mut last_error = None;
+    let mut total_delay_ms = 0u64;
+
+    for attempt in 1..=config.max_attempts {
+        match request_fn().await {
+            Ok(response) => {
+                // Check if it's a 5xx error that should be retried
+                let status = response.status();
+                if status.is_server_error() && attempt < config.max_attempts {
+                    if !silent_mode {
+                        log_retry_attempt(
+                            endpoint,
+                            attempt,
+                            config.max_attempts,
+                            &format!("Server error {}", status),
+                        );
+
+                        let delay = calculate_backoff_delay(
+                            attempt,
+                            config.base_delay_ms,
+                            config.backoff_multiplier,
+                        );
+                        let delay_ms = delay.as_millis() as u64;
+                        total_delay_ms += delay_ms;
+
+                        log_retry_delay(endpoint, attempt + 1, delay_ms);
+                        sleep(delay).await;
+                    } else {
+                        let delay = calculate_backoff_delay(
+                            attempt,
+                            config.base_delay_ms,
+                            config.backoff_multiplier,
+                        );
+                        total_delay_ms += delay.as_millis() as u64;
+                        sleep(delay).await;
+                    }
+                    continue;
+                }
+
+                // Success or non-retryable status code
+                if attempt > 1 && !silent_mode {
+                    log_retry_success(endpoint, attempt, total_delay_ms);
+                }
+                return Ok(response);
+            }
+            Err(error) => {
+                if let Some(retryable_error) = classify_error(&error) {
+                    if attempt < config.max_attempts {
+                        if !silent_mode {
+                            log_retry_attempt(
+                                endpoint,
+                                attempt,
+                                config.max_attempts,
+                                &format!("{:?}", retryable_error),
+                            );
+
+                            let delay = calculate_backoff_delay(
+                                attempt,
+                                config.base_delay_ms,
+                                config.backoff_multiplier,
+                            );
+                            let delay_ms = delay.as_millis() as u64;
+                            total_delay_ms += delay_ms;
+
+                            log_retry_delay(endpoint, attempt + 1, delay_ms);
+                            sleep(delay).await;
+                        } else {
+                            let delay = calculate_backoff_delay(
+                                attempt,
+                                config.base_delay_ms,
+                                config.backoff_multiplier,
+                            );
+                            total_delay_ms += delay.as_millis() as u64;
+                            sleep(delay).await;
+                        }
+                        last_error = Some(error);
+                        continue;
+                    }
+                }
+
+                // Non-retryable error or max attempts reached
+                if !silent_mode {
+                    log_retry_exhausted(endpoint, config.max_attempts, &format!("{:?}", error));
+                }
+                return Err(error);
+            }
+        }
+    }
+
+    // This should never be reached, but handle it gracefully
+    // Since we can't easily create hyper::Error, just use the first attempt's error
+    let final_error = last_error.unwrap_or_else(|| panic!("No error available in retry logic"));
+    if !silent_mode {
+        log_retry_exhausted(endpoint, config.max_attempts, &format!("{:?}", final_error));
+    }
+    Err(final_error)
+}
+
 async fn proxy_handler_with_events_impl(
     req: Request<Body>,
     state: SharedState,
@@ -330,8 +494,8 @@ async fn proxy_handler_with_events_impl(
     // Generate unique connection ID
     let connection_id = generate_connection_id();
 
-    // Get the current endpoint and corresponding auth token for this request
-    let (endpoint_for_request, auth_token) = {
+    // Get the current endpoint, auth token, and retry config for this request
+    let (endpoint_for_request, auth_token, retry_config) = {
         let state_guard = state
             .lock()
             .map_err(|e| anyhow::anyhow!("Failed to acquire state lock: {}", e))?;
@@ -346,7 +510,9 @@ async fn proxy_handler_with_events_impl(
             .map(|(token, _, _)| token)
             .unwrap_or_default();
 
-        (current_endpoint, auth_token)
+        let retry_config = state_guard.config.retry.clone();
+
+        (current_endpoint, auth_token, retry_config)
     };
 
     // Build the target URI
@@ -362,6 +528,11 @@ async fn proxy_handler_with_events_impl(
     // Create new request to target
     let (mut parts, body) = req.into_parts();
     parts.uri = uri;
+
+    // Convert body to bytes so it can be reused for retries if needed
+    let body_bytes = hyper::body::to_bytes(body)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to read request body: {}", e))?;
 
     // Extract host from the endpoint URL
     let host = endpoint_for_request
@@ -382,8 +553,6 @@ async fn proxy_handler_with_events_impl(
             parts.headers.insert("authorization", auth_header);
         }
     }
-
-    let new_req = Request::from_parts(parts, body);
 
     // Start connection tracking and set to processing in single lock acquisition
     let active_connection = {
@@ -417,15 +586,66 @@ async fn proxy_handler_with_events_impl(
         log_proxy_request(&endpoint_for_request);
     }
 
-    // Forward request with timeout - This will block for the entire duration of the AI response
-    // For AI responses, this await can take 30+ seconds for long content generation
-    // Set a generous timeout for AI responses (5 minutes)
-    let timeout_duration = std::time::Duration::from_secs(300); // 5 minutes
-    let response = tokio::time::timeout(timeout_duration, client.request(new_req)).await;
+    // Create a closure for the request execution that can be retried
+    let body_bytes_for_retry = body_bytes.clone();
+    let client_for_retry = client.clone();
+    let uri_for_retry = parts.uri.clone();
+    let headers_for_retry = parts.headers.clone();
+    let method_for_retry = parts.method.clone();
+    let version_for_retry = parts.version;
+
+    let request_fn = move || {
+        let body_bytes = body_bytes_for_retry.clone();
+        let client = client_for_retry.clone();
+        let uri = uri_for_retry.clone();
+        let headers = headers_for_retry.clone();
+        let method = method_for_retry.clone();
+        let version = version_for_retry;
+
+        async move {
+            // Build new request using builder pattern
+            let mut request_builder = hyper::Request::builder()
+                .method(method)
+                .uri(uri)
+                .version(version);
+
+            // Add all headers
+            for (name, value) in headers.iter() {
+                request_builder = request_builder.header(name, value);
+            }
+
+            // This should not fail if we're cloning valid parts
+            let new_req = request_builder
+                .body(Body::from(body_bytes))
+                .expect("Failed to build request from valid parts");
+
+            // Set a generous timeout for AI responses (5 minutes)
+            let timeout_duration = std::time::Duration::from_secs(300);
+            match tokio::time::timeout(timeout_duration, client.request(new_req)).await {
+                Ok(result) => result,
+                Err(_timeout) => {
+                    // Return timeout error: re-use the first connection error format
+                    // This is a hack but necessary since hyper::Error is hard to construct
+                    client
+                        .request(hyper::Request::get("").body(Body::empty()).unwrap())
+                        .await
+                }
+            }
+        }
+    };
+
+    // Execute request with retry logic
+    let response = retry_request(
+        &retry_config,
+        &endpoint_for_request,
+        silent_mode,
+        request_fn,
+    )
+    .await;
 
     // Handle all possible outcomes with unified cleanup
     let result = match response {
-        Ok(Ok(mut resp)) => {
+        Ok(mut resp) => {
             // Response headers received, but AI might still be generating content
             // Keep status as Processing during body transmission
 
@@ -498,10 +718,13 @@ async fn proxy_handler_with_events_impl(
                 }
             }
         }
-        Ok(Err(e)) => {
-            // HTTP request error
+        Err(e) => {
+            // HTTP request error (already went through retry logic)
             if !silent_mode {
-                log_proxy_error(&endpoint_for_request, &format!("HTTP error: {e}"));
+                log_proxy_error(
+                    &endpoint_for_request,
+                    &format!("HTTP error after retries: {e}"),
+                );
             }
 
             // Mark the endpoint we actually used as failed
@@ -523,33 +746,6 @@ async fn proxy_handler_with_events_impl(
             Ok(Response::builder()
                 .status(StatusCode::BAD_GATEWAY)
                 .body(Body::from("HTTP error"))?)
-        }
-        Err(_timeout) => {
-            // Request timeout
-            if !silent_mode {
-                log_proxy_error(&endpoint_for_request, "Request timeout (5 minutes)");
-            }
-
-            // Mark the endpoint we actually used as failed
-            {
-                let mut state_guard = state.lock().unwrap();
-                if let Some(status) = state_guard.endpoint_status.get_mut(&endpoint_for_request) {
-                    status.available = false;
-                    status.error = Some("Request timeout".to_string());
-                    status.last_check = chrono::Utc::now();
-                }
-            }
-
-            cleanup_connection_on_exit(
-                &connection_id,
-                &connection_tracker,
-                &event_sender,
-                "request_timeout",
-            )
-            .await;
-            Ok(Response::builder()
-                .status(StatusCode::GATEWAY_TIMEOUT)
-                .body(Body::from("Request timeout"))?)
         }
     };
 
