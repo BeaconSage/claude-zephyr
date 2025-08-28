@@ -7,7 +7,8 @@ config.toml
 .env
 .env.local
 
-# Log files
+# Log files and directories
+logs/
 *.log
 
 # macOS
