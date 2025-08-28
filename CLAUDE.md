@@ -129,16 +129,29 @@ curl http://localhost:8080/status | jq .
 # Health check endpoint
 curl http://localhost:8080/health
 
-# Real-time log monitoring (separate terminal)
-./watch-logs.sh                 # Simple real-time log viewing
-./monitor-logs.sh               # Advanced monitoring with options
-./monitor-logs.sh -r            # Only retry-related logs
-./monitor-logs.sh -e            # Only error logs
-./monitor-logs.sh -h            # Show all options
+# Real-time log monitoring (intelligent single script)
+./watch-logs.sh                 # Simple mode: all logs with stats
+./watch-logs.sh -p              # Proxy requests only
+./watch-logs.sh -r              # Retry logs only
+./watch-logs.sh -e              # Error logs only
+./watch-logs.sh -H              # Health check logs only
+./watch-logs.sh -s              # Endpoint switching logs only
+
+# Advanced analysis modes
+./watch-logs.sh --proxy-stats    # Detailed proxy request analysis
+./watch-logs.sh --error-analysis # Error statistics and breakdown
+./watch-logs.sh --help           # Show all available options
+
+# Output customization
+./watch-logs.sh -n 100          # Show last 100 lines
+./watch-logs.sh --no-stats      # Disable statistics
+./watch-logs.sh -j              # JSON format output
 
 # Manual log viewing
-tail -f logs/claude-zephyr.log  # Basic log following
-grep "🔁" logs/claude-zephyr.log # Search retry attempts
+tail -f logs/claude-zephyr.log        # Basic log following
+tail -f logs/claude-zephyr.$(date +%Y-%m-%d)  # Today's rotated log
+grep "🔁" logs/claude-zephyr.*         # Search retry attempts across files
+grep "🔄.*Request →" logs/claude-zephyr.* # Search proxy requests
 ```
 
 ## Configuration Reference
