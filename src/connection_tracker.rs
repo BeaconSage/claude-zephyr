@@ -252,7 +252,10 @@ pub fn generate_connection_id() -> String {
     let counter = CONNECTION_COUNTER.fetch_add(1, Ordering::Relaxed);
     let timestamp = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_else(|_| {
+            // Fallback to a default timestamp if system time is invalid
+            std::time::Duration::from_secs(1700000000) // Some reasonable epoch time
+        })
         .as_millis();
     format!("req_{timestamp}_{counter}")
 }

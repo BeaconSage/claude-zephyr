@@ -170,10 +170,12 @@ pub async fn start_proxy_server(config: Config, state: SharedState) -> anyhow::R
                         Ok(response) => Ok::<Response<Body>, hyper::Error>(response),
                         Err(e) => {
                             error!("Request error: {}", e);
+                            // Use expect here since this is a last resort error handler
+                            // and the Response::builder should never fail with valid inputs
                             Ok(Response::builder()
                                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                                 .body(Body::from("Internal server error"))
-                                .unwrap())
+                                .expect("Failed to build error response"))
                         }
                     }
                 }
@@ -232,10 +234,12 @@ pub async fn start_proxy_server_with_events_dashboard(
                         Ok(response) => Ok::<Response<Body>, hyper::Error>(response),
                         Err(e) => {
                             error!("Request error: {}", e);
+                            // Use expect here since this is a last resort error handler
+                            // and the Response::builder should never fail with valid inputs
                             Ok(Response::builder()
                                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                                 .body(Body::from("Internal server error"))
-                                .unwrap())
+                                .expect("Failed to build error response"))
                         }
                     }
                 }
@@ -290,10 +294,12 @@ pub async fn start_proxy_server_with_events(
                         Ok(response) => Ok::<Response<Body>, hyper::Error>(response),
                         Err(e) => {
                             error!("Request error: {}", e);
+                            // Use expect here since this is a last resort error handler
+                            // and the Response::builder should never fail with valid inputs
                             Ok(Response::builder()
                                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                                 .body(Body::from("Internal server error"))
-                                .unwrap())
+                                .expect("Failed to build error response"))
                         }
                     }
                 }
@@ -487,11 +493,44 @@ where
     }
 
     // This should never be reached, but handle it gracefully
-    let final_error = last_error.unwrap_or_else(|| panic!("No error available in retry logic"));
-    if !silent_mode {
-        log_retry_exhausted(endpoint, config.max_attempts, &format!("{:?}", final_error));
+    if let Some(final_error) = last_error {
+        if !silent_mode {
+            log_retry_exhausted(endpoint, config.max_attempts, &format!("{:?}", final_error));
+        }
+        RetryResult::FailedEndpoint(final_error)
+    } else {
+        // This is truly an exceptional case - all retries failed but no error was captured
+        // Log this unusual condition and return a final error to prevent panic
+        if !silent_mode {
+            log_retry_exhausted(
+                endpoint,
+                config.max_attempts,
+                "Unknown error - no error captured during retries",
+            );
+        }
+        // We need to create a hyper::Error somehow. Use a timeout-style approach.
+        // Since we can't directly construct hyper::Error, we'll use FinalError
+        // and let the caller handle the missing error case by using their client
+        // to generate an appropriate error response.
+        RetryResult::FinalError(
+            // Create a temporary client and use the existing error generation pattern
+            futures::executor::block_on(async {
+                let connector = hyper_tls::HttpsConnector::new();
+                let client = hyper::Client::builder().build::<_, hyper::Body>(connector);
+                match client
+                    .request(
+                        hyper::Request::get("")
+                            .body(hyper::Body::empty())
+                            .expect("Failed to create error request"),
+                    )
+                    .await
+                {
+                    Err(e) => e,
+                    Ok(_) => unreachable!("Request to empty URL should always fail"),
+                }
+            }),
+        )
     }
-    RetryResult::FailedEndpoint(final_error)
 }
 
 /// Try request with fallback endpoints when the primary endpoint fails
@@ -512,7 +551,28 @@ async fn try_with_fallback_endpoints(
 
     // Get all available endpoints from the state, prioritizing healthy ones
     let available_endpoints = {
-        let state_guard = state.lock().unwrap();
+        let state_guard = match state.lock() {
+            Ok(guard) => guard,
+            Err(_) => {
+                // If state lock is poisoned, return a simple error
+                // Use the existing async error generation pattern synchronously
+                return Err(futures::executor::block_on(async {
+                    let connector = hyper_tls::HttpsConnector::new();
+                    let client = hyper::Client::builder().build::<_, hyper::Body>(connector);
+                    match client
+                        .request(
+                            hyper::Request::get("")
+                                .body(hyper::Body::empty())
+                                .expect("Failed to create error request"),
+                        )
+                        .await
+                    {
+                        Err(e) => e,
+                        Ok(_) => unreachable!("Request to empty URL should always fail"),
+                    }
+                }));
+            }
+        };
         let mut endpoints = Vec::new();
 
         // First, try the current endpoint (already attempted, but may work with different timing)
@@ -638,8 +698,13 @@ async fn try_with_fallback_endpoints(
                     Ok(result) => result,
                     Err(_timeout) => {
                         // Create a timeout error by making a request to invalid URL
+                        // Use expect since this is a fallback error construction
                         client
-                            .request(hyper::Request::get("").body(Body::empty()).unwrap())
+                            .request(
+                                hyper::Request::get("")
+                                    .body(Body::empty())
+                                    .expect("Failed to create error request"),
+                            )
                             .await
                     }
                 }
@@ -689,7 +754,11 @@ async fn try_with_fallback_endpoints(
     // We need to create a hyper error somehow - use the timeout approach
     let client_for_error = client.clone();
     client_for_error
-        .request(hyper::Request::get("").body(Body::empty()).unwrap())
+        .request(
+            hyper::Request::get("")
+                .body(Body::empty())
+                .expect("Failed to create error request"),
+        )
         .await
 }
 
@@ -798,7 +867,7 @@ async fn proxy_handler_with_events_impl(
             let state_guard = state
                 .lock()
                 .map_err(|e| anyhow::anyhow!("Failed to acquire state lock: {}", e))?;
-            state_guard.config.logging.detail_level.clone()
+            state_guard.config.logging.proxy_detail.clone()
         };
 
         // Log detailed request information
@@ -867,8 +936,13 @@ async fn proxy_handler_with_events_impl(
                 Err(_timeout) => {
                     // Return timeout error: re-use the first connection error format
                     // This is a hack but necessary since hyper::Error is hard to construct
+                    // Use expect since this is a fallback error construction
                     client
-                        .request(hyper::Request::get("").body(Body::empty()).unwrap())
+                        .request(
+                            hyper::Request::get("")
+                                .body(Body::empty())
+                                .expect("Failed to create error request"),
+                        )
                         .await
                 }
             }
@@ -921,7 +995,7 @@ async fn proxy_handler_with_events_impl(
                             let state_guard = state.lock().map_err(|e| {
                                 anyhow::anyhow!("Failed to acquire state lock: {}", e)
                             })?;
-                            state_guard.config.logging.detail_level.clone()
+                            state_guard.config.logging.proxy_detail.clone()
                         };
 
                         // Calculate response time if we stored the start time
@@ -1254,12 +1328,15 @@ async fn proxy_handler(
 
             // Mark the endpoint we actually used as failed
             {
-                let mut state_guard = state.lock().unwrap();
-                if let Some(status) = state_guard.endpoint_status.get_mut(&endpoint_for_request) {
-                    status.available = false;
-                    status.error = Some("Request timeout".to_string());
-                    status.last_check = chrono::Utc::now();
+                if let Ok(mut state_guard) = state.lock() {
+                    if let Some(status) = state_guard.endpoint_status.get_mut(&endpoint_for_request)
+                    {
+                        status.available = false;
+                        status.error = Some("Request timeout".to_string());
+                        status.last_check = chrono::Utc::now();
+                    }
                 }
+                // If lock is poisoned, continue without updating state
             }
 
             Ok(Response::builder()

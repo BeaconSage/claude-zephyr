@@ -138,12 +138,12 @@ impl Default for RetryConfig {
 /// Logging configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingConfig {
-    /// Log level (trace, debug, info, warn, error)
+    /// Global log output level (trace, debug, info, warn, error)
     #[serde(default = "default_log_level")]
-    pub level: String,
-    /// Detail level for proxy request/response logging
+    pub output_level: String,
+    /// Proxy request/response detail level (basic, standard, detailed, debug)
     #[serde(default)]
-    pub detail_level: DetailLevel,
+    pub proxy_detail: DetailLevel,
     /// Enable console output
     #[serde(default = "default_console_enabled")]
     pub console_enabled: bool,
@@ -167,8 +167,8 @@ pub struct LoggingConfig {
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
-            level: default_log_level(),
-            detail_level: DetailLevel::default(),
+            output_level: default_log_level(),
+            proxy_detail: DetailLevel::default(),
             console_enabled: default_console_enabled(),
             file_enabled: default_file_enabled(),
             file_path: default_file_path(),

@@ -1,6 +1,6 @@
 use hyper::{HeaderMap, Method};
 use std::collections::HashSet;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::config::DetailLevel;
 
@@ -149,13 +149,13 @@ pub fn log_proxy_request_detailed(
                         .map(|(k, v)| format!("{}={}", k, v))
                         .collect::<Vec<_>>()
                         .join(", ");
-                    debug!("{}   Headers: {}", log_cat::PROXY, headers_str);
+                    info!("{}   Headers: {}", log_cat::PROXY, headers_str);
                 }
             }
             if let Some(body) = body {
                 let filtered_body = security::filter_sensitive_body(body, 4096);
                 if !filtered_body.is_empty() {
-                    debug!("{}   Body: {}", log_cat::PROXY, filtered_body);
+                    info!("{}   Body: {}", log_cat::PROXY, filtered_body);
                 }
             }
         }
@@ -224,13 +224,13 @@ pub fn log_proxy_response_detailed(
                         .map(|(k, v)| format!("{}={}", k, v))
                         .collect::<Vec<_>>()
                         .join(", ");
-                    debug!("{}   Headers: {}", log_cat::PROXY, headers_str);
+                    info!("{}   Headers: {}", log_cat::PROXY, headers_str);
                 }
             }
             if let Some(body) = body {
                 let filtered_body = security::filter_sensitive_body(body, 4096);
                 if !filtered_body.is_empty() {
-                    debug!("{}   Body: {}", log_cat::PROXY, filtered_body);
+                    info!("{}   Body: {}", log_cat::PROXY, filtered_body);
                 }
             }
         }

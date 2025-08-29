@@ -62,8 +62,8 @@ endpoints = [
 
 # ============ 日志配置 (可选) ============
 [logging]
-# level = "info"                     # 日志级别: trace, debug, info, warn, error（默认：info）
-# detail_level = "standard"          # 代理请求详细级别（默认：basic）
+# output_level = "info"              # 全局日志输出级别: trace, debug, info, warn, error（默认：info）
+# proxy_detail = "basic"             # 代理请求详细级别（默认：basic）
 #                                    #   - basic: 仅显示端点URL
 #                                    #   - standard: 添加方法、路径、状态码、响应时间
 #                                    #   - detailed: 添加请求/响应头信息

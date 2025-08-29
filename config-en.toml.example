@@ -62,8 +62,8 @@ endpoints = [
 
 # ============ Logging Configuration (Optional) ============
 [logging]
-# level = "info"                     # Log level: trace, debug, info, warn, error (default: info)
-# detail_level = "standard"          # Proxy request detail level (default: basic)
+# output_level = "info"              # Global log output level: trace, debug, info, warn, error (default: info)
+# proxy_detail = "basic"             # Proxy request detail level (default: basic)
 #                                    #   - basic: Only show endpoint URL
 #                                    #   - standard: Add method, path, status code, response time
 #                                    #   - detailed: Add request/response headers

@@ -31,7 +31,7 @@ fn init_logging(config: &Config, headless_mode: bool) -> anyhow::Result<()> {
 
     // Parse log level
     let env_filter = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new(&log_config.level))
+        .or_else(|_| EnvFilter::try_new(&log_config.output_level))
         .unwrap_or_else(|_| EnvFilter::new("info"));
 
     // Always enable file logging if configured, regardless of mode
